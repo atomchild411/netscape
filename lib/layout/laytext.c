@@ -1144,6 +1144,23 @@ lo_baseline_adjust(MWContext *context,
  *
  * Returns: Nothing
  *************************************/
+/*
+ * UTF-8 is a multibyte charset to INTL, so its text was broken into lines
+ * as Chinese or Japanese text is, after any character.  Most UTF-8 text is
+ * written with spaces between words: lay it out that way unless it holds
+ * CJK characters (U+3000 and up: lead bytes 0xE3 and above).
+ */
+static Bool
+lo_utf8_needs_cjk_breaks(const char *s, int32 len)
+{
+	int32 i;
+
+	for (i = 0; i < len && s[i] != '\0'; i++)
+		if ((unsigned char) s[i] >= 0xE3 && (unsigned char) s[i] <= 0xEF)
+			return TRUE;
+	return FALSE;
+}
+
 void
 lo_BreakOldElement(MWContext *context, lo_DocState *state)
 {
@@ -1198,6 +1215,15 @@ XP_TRACE(("lo_BreakOldElement, flush text.\n"));
 	 * Move to the element we will break
 	 */
 	text_data = state->old_break;
+	if (multi_byte && IS_UTF8_CSID(charset) && text_data != NULL &&
+		text_data->text != NULL)
+	{
+		char *t;
+
+		PA_LOCK(t, char *, text_data->text);
+		multi_byte = lo_utf8_needs_cjk_breaks(t, text_data->text_len);
+		PA_UNLOCK(text_data->text);
+	}
 
 	/*
 	 * If there is no text there to break
@@ -1602,6 +1628,15 @@ XP_TRACE(("lo_BreakOldElement, left over word (%s)\n", new_buf));
 			if (tptr != NULL)
 			{
 				tptr->lo_any.prev = (LO_Element *)new_text_data;
+			}
+
+			/* the rest of the word is still this block's text: reflow
+			 * (lo_RelayoutTextElements) recycles the block's elements and
+			 * lays its text out again, and an element left out of the
+			 * block stayed as well (a word drawn twice) */
+			if (block != NULL && block->endTextElement == text_data)
+			{
+				block->endTextElement = new_text_data;
 			}
 
 			eptr = tptr;
@@ -2462,6 +2497,19 @@ lo_transform_ascii_text(char *ptr, char *method)
 			*ptr = (char) toupper(c);
 		else if (c < 0x80 && how == LOWERCASE)
 			*ptr = (char) tolower(c);
+		else if (c == 0xC3 && ptr[1] != '\0')
+		{
+			/* U+00C0..U+00DE <-> U+00E0..U+00FE (not the signs
+			 * U+00D7, U+00F7): UTF-8 C3 80..9E <-> C3 A0..BE */
+			unsigned char d = (unsigned char) ptr[1];
+
+			if ((how == UPPERCASE || (how == CAPITALIZE && first)) &&
+				d >= 0xA0 && d <= 0xBE && d != 0xB7)
+				ptr[1] = (char) (d - 0x20);
+			else if (how == LOWERCASE && d >= 0x80 && d <= 0x9E && d != 0x97)
+				ptr[1] = (char) (d + 0x20);
+			ptr++;
+		}
 		first = FALSE;
 	}
 }
@@ -2570,6 +2618,7 @@ lo_LayoutFormattedText(MWContext *context,
 	Bool white_space;
 	int16 charset;
 	Bool multi_byte;
+	Bool utf8;
 	LO_TextStruct text_data;
 	char * text;
 	
@@ -2601,7 +2650,9 @@ lo_LayoutFormattedText(MWContext *context,
 
 	charset = block->text_attr->charset;
 	if ((INTL_CharSetType(charset) == SINGLEBYTE) ||
-		(INTL_CharSetType(charset) & CS_SPACE))
+		(INTL_CharSetType(charset) & CS_SPACE) ||
+		(IS_UTF8_CSID(charset) &&
+		 !lo_utf8_needs_cjk_breaks(text, XP_STRLEN(text))))
 	{
 		multi_byte = FALSE;
 	}
@@ -2609,6 +2660,11 @@ lo_LayoutFormattedText(MWContext *context,
 	{
 		multi_byte = TRUE;
 	}
+	/* UTF-8 laid out as single-byte text (above): byte 0xA0 is not a
+	 * no-break space there but part of a character (U+00A0 is C2 A0, kept
+	 * whole, which keeps it unbreakable), and text-transform was applied
+	 * when the text came (lo_FormatText) */
+	utf8 = IS_UTF8_CSID(charset);
 
 	/*
 	 * Move through this text fragment, breaking it up into
@@ -2654,7 +2710,7 @@ lo_LayoutFormattedText(MWContext *context,
 					property = STYLESTRUCT_GetString(style_struct, 
 													 TEXT_TRANSFORM_STYLE);
 
-					if(property)
+					if(property && !utf8)
 					{
 						lo_transform_text_from_string_method(tptr, property);
 					}
@@ -2736,7 +2792,7 @@ lo_LayoutFormattedText(MWContext *context,
 			ccnt = state->line_buf_len;
 			while ((!XP_IS_SPACE(*tptr))&&(*tptr != '\0')&&(ccnt < SIZE_LIMIT))
 			{
-				if ((unsigned char)*tptr == NON_BREAKING_SPACE)
+				if (!utf8 && (unsigned char)*tptr == NON_BREAKING_SPACE)
 				{
 					has_nbsp = TRUE;
 				}
@@ -2751,7 +2807,7 @@ lo_LayoutFormattedText(MWContext *context,
 #else
 			while ((!XP_IS_SPACE(*tptr))&&(*tptr != '\0'))
 			{
-				if ((unsigned char)*tptr == NON_BREAKING_SPACE)
+				if (!utf8 && (unsigned char)*tptr == NON_BREAKING_SPACE)
 				{
 					/* *tptr = ' '; Replace this later */
 					has_nbsp = TRUE;
@@ -3040,7 +3096,7 @@ XP_TRACE(("Throwing out empty string!\n"));
 			{
 				*to_ptr = *tmp_ptr;
 				if (((unsigned char)*to_ptr == NON_BREAKING_SPACE)
-					&& (CS_USER_DEFINED_ENCODING != charset))
+					&& (CS_USER_DEFINED_ENCODING != charset) && !utf8)
 				{
 					*to_ptr = ' ';
 				}

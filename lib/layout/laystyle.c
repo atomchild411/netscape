@@ -908,7 +908,9 @@ LO_PopStyleTagByIndex(MWContext *context, lo_DocState **state,
     	/* add bottom padding */
     	bottom_padding = STYLESTRUCT_GetNumber(top_style, BOTTOMPADDING_STYLE);
 		LO_AdjustSSUnits(bottom_padding, BOTTOMPADDING_STYLE, context, *state);
-    	if(bottom_padding && bottom_padding->value > 0)
+    	/* hidden content (display: none here or above) has no box */
+    	if(bottom_padding && bottom_padding->value > 0 &&
+    	   !(*state)->hide_content)
     	{
         	int32 move_size = FEUNITS_Y((int32)bottom_padding->value, context);
         	lo_SetSoftLineBreakState(context, *state, FALSE, 1);
@@ -956,8 +958,8 @@ LO_PopStyleTagByIndex(MWContext *context, lo_DocState **state,
 		lo_TeardownList(context, *state, NULL);
 	}
 
-	/* apply bottom margins */
-	if(bottom_margin && bottom_margin->value > 0)
+	/* apply bottom margins (not for hidden content: no box) */
+	if(bottom_margin && bottom_margin->value > 0 && !(*state)->hide_content)
 	{
         int32 move_size = FEUNITS_Y((int32)bottom_margin->value, context);
         lo_SetSoftLineBreakState(context, *state, FALSE, 1);

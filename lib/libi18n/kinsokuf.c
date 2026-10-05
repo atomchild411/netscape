@@ -42,6 +42,9 @@ PUBLIC const char *INTL_NonBreakingSpace(uint16 win_csid)
 #ifdef XP_MAC
         return "\07";		/* 0x07 */
 #else
+        /* in UTF-8 text a lone 0xA0 is not a character: U+00A0 */
+        if (IS_UTF8_CSID(win_csid))
+                return "\302\240";
         return "\240";		/* 0xA0 */
 #endif
 
