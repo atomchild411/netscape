@@ -68,6 +68,7 @@ typedef struct pa_DocData_struct {
     int32 hold_len;
 	pa_Overflow *overflow_stack;
     int overflow_depth;	      /* send data to overflow_buf */
+    void *unload_wait;		/* the unload event's stream while it is out */
     int32 brute_tag;
     int32 comment_bytes;
     void *layout_state;

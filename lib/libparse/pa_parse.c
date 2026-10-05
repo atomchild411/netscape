@@ -309,6 +309,7 @@ pa_new_document(FO_Present_Types format_out,
 		doc_data->layout_state = NULL;
     }
     doc_data->window_id = window_id;
+    doc_data->unload_wait = NULL;
     doc_data->output_tag = output_func;
     doc_data->hold = 0;
     doc_data->hold_size = HOLD_BUF_UNIT;
@@ -460,6 +461,16 @@ static void
 pa_unload_complete(NET_StreamClass *stream)
 {
 	pa_DocData *doc_data = (pa_DocData *) stream->data_object;	
+	pa_DocDataList *dptr;
+
+	/* The document may have gone (another load or relayout interrupted
+	 * it) while the unload event was out: then this is not ours to do. */
+	for (dptr = DocDataList; dptr != NULL; dptr = dptr->next)
+		if (dptr->doc_data == doc_data)
+			break;
+	if (dptr == NULL || doc_data->unload_wait != (void *) stream)
+		return;
+	doc_data->unload_wait = NULL;
 
         /* The overflow value was set to one just before sending the JS
            onUnload event and the only thing that can change it is
@@ -503,6 +514,7 @@ pa_check_for_new_doc(MWContext *window_id, pa_DocData *doc_data)
 	  /*		doc_data->overflow = 1;*/
 		PA_PushOverflow(doc_data);
 		doc_data->overflow_depth ++;
+		doc_data->unload_wait = s;
 		/* send the event to mocha so we get called back */
 		ET_SendLoadEvent(window_id, EVENT_UNLOAD, (ETVoidPtrFunc) pa_unload_complete,
 				 s, LO_DOCUMENT_LAYER_ID,

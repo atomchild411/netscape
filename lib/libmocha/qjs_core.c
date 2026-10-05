@@ -889,9 +889,6 @@ qjs_load_later(void *arg)
 
 	if (l->doc_id == XP_DOCID(l->context) || l->type == EVENT_UNLOAD)
 		qjs_SendLoadEvent(l->context, l->type, l->resize_reload);
-	if (getenv("QJS_DOM_TRACE"))
-		qjs_Log("dom: load event %lx delivered, closure %p", (long) l->type,
-				(void *) l->closure);
 	if (l->closure)
 		l->closure(l->data);
 	XP_FREE(l);
@@ -904,9 +901,6 @@ ET_SendLoadEvent(MWContext *context, int32 type, ETVoidPtrFunc closure,
 	qjs_LoadEvent *l;
 	MochaDecoder *decoder = qjs_GetDecoder(context, FALSE);
 
-	if (getenv("QJS_DOM_TRACE"))
-		qjs_Log("dom: ET_SendLoadEvent type %lx layer %ld resize %d closure %p",
-				(long) type, (long) layer_id, (int) resize_reload, (void *) closure);
 
 	if (decoder && type == EVENT_LOAD && layer_id == LO_DOCUMENT_LAYER_ID) {
 		/* the document is all laid out: document.write would start a

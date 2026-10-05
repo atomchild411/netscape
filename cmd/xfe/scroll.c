@@ -1179,10 +1179,24 @@ fe_scroller_resize (Widget widget, XtPointer closure)
      size changes... */
   Dimension w = 0, h = 0;
   Boolean relayout_p = False;
+  Boolean relayout_now = False;
 
   XtVaGetValues (widget, XmNwidth, &w, XmNheight, &h, 0);
 
   relayout_p = ((Dimension) fep->scrolled_width) != w;
+
+  /* Layout works to the scrolled window's width less a scrollbar, whether
+     or not there is one (XFE_LayoutNewDocument): if only a scrollbar came
+     or went, laying out again changes nothing -- and would make the
+     scrollbar go and come again as the document starts over, for ever. */
+  if (relayout_p && !context->is_grid_cell && fep->scrolled &&
+      fep->laid_out_scrolled_width)
+    {
+      Dimension sw = 0;
+      XtVaGetValues (fep->scrolled, XmNwidth, &sw, 0);
+      if (sw == fep->laid_out_scrolled_width)
+	relayout_p = False;
+    }
 
 /*
  * Inside FRAMES (and eventually elsewhere?) we DO want to reload, even if
@@ -1265,6 +1279,7 @@ fe_scroller_resize (Widget widget, XtPointer closure)
 	   */
 	  CONTEXT_DATA(context)->scrolled_width  = (unsigned long)w;
 	  CONTEXT_DATA(context)->scrolled_height = (unsigned long)h;
+	  relayout_now = True;
       }
     }
   /* We just need to update the scrollbars and scrolled_height and width;
@@ -1301,7 +1316,13 @@ fe_scroller_resize (Widget widget, XtPointer closure)
 	/*  As vidur suggested in Bug 59214: because JS generated content
 	was not put into wysiwyg, hence this source was not be shown on a resize.
   	The fix was to make the reload policy for Mail/News contexts NET_NORMAL_RELOAD */
-        if ( (type == MWContextNews) || (type == MWContextMail) 
+	/* Only when the width layout uses changed, and not while a document
+	   is being laid out (then relayout_required does it at the end):
+	   laying out again for every scrollbar that comes and goes never
+	   ends, a relayout making the scrollbar go and come again. */
+	if (!relayout_now)
+	  ;
+	else if ( (type == MWContextNews) || (type == MWContextMail) 
 	     || (type == MWContextNewsMsg) || (type == MWContextMailMsg) )
 	  fe_ReLayout (context, NET_NORMAL_RELOAD);
 	else

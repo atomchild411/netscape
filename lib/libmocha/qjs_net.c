@@ -298,7 +298,9 @@ qjs_ns_load(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
 	l->next = (qjs_Load *) decoder->qjs_loads;
 	decoder->qjs_loads = l;
 	us->fe_data = l;
-	if (NET_GetURL(us, post ? FO_QJSLOAD : FO_CACHE_AND_QJSLOAD,
+	/* POSTs, and URLs too long for the cache's index, are not cached */
+	if (NET_GetURL(us, post || XP_STRLEN(us->address) > 1000 ?
+					   FO_QJSLOAD : FO_CACHE_AND_QJSLOAD,
 				   decoder->window_context, qjs_load_exit) < 0) {
 		/* the exit function has been called */
 	}

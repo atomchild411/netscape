@@ -1278,6 +1278,9 @@ typedef struct fe_ContextData
    NewPixmapPtr       NewPixmap;
    ImageCompletePtr   ImageComplete;
 
+  /* the scrolled window's width the document was laid out for: a
+     scrollbar coming or going changes nothing layout uses */
+  Dimension laid_out_scrolled_width;
 } fe_ContextData;
 
 #define EDITOR_CONTEXT_DATA(context)	((&CONTEXT_DATA(context)->editor))

@@ -2849,9 +2849,6 @@ qjs_dom_schedule(MochaDecoder *decoder, qjs_Dom *dom)
 {
 	int64 wait = QJS_RENDER_DELAY, since;
 
-	if (getenv("QJS_DOM_TRACE"))
-		qjs_Log("dom: schedule (loaded %d, timer %d, renders %d)",
-				decoder->load_event_sent, dom->render_timer != NULL, (int) dom->renders);
 	if (!decoder->load_event_sent || dom->render_timer || dom->in_render)
 		return;
 	if (!dom->user_event) {
@@ -2875,26 +2872,39 @@ qjs_DomLoaded(MochaDecoder *decoder)
 		qjs_dom_schedule(decoder, dom);
 }
 
-/* A resize reload is over: ours, or the window's (which laid out the
- * page's source, not the tree scripts changed: do that again). */
+/* A resize reload is over. */
 void
 qjs_DomRelaidOut(MochaDecoder *decoder)
 {
 	qjs_Dom *dom = qjs_dom_of(decoder);
 
-	if (!dom)
+	if (!dom || !dom->in_render)
 		return;
-	if (dom->in_render) {
-		dom->in_render = FALSE;
-		if (dom->mutated)
-			qjs_dom_schedule(decoder, dom);
-		return;
-	}
-	if (dom->renders > 0) {
-		dom->mutated = TRUE;
-		dom->user_event = TRUE;
+	dom->in_render = FALSE;
+	if (dom->mutated)
 		qjs_dom_schedule(decoder, dom);
+}
+
+static void qjs_dom_render(MochaDecoder *decoder, qjs_Dom *dom);
+
+/* The window is laid out again for a new size (fe_ReLayout): if scripts
+ * changed the document, lay out the tree, not the page's source.  TRUE:
+ * done. */
+JSBool
+LM_RelayoutFromDom(MWContext *context)
+{
+	MochaDecoder *decoder = qjs_GetDecoder(context, FALSE);
+	qjs_Dom *dom = qjs_dom_of(decoder);
+
+	if (!dom || dom->renders == 0 || !decoder->load_event_sent)
+		return FALSE;
+	if (dom->render_timer) {
+		FE_ClearTimeout(dom->render_timer);
+		dom->render_timer = NULL;
 	}
+	dom->renders--;		/* not one of the script's */
+	qjs_dom_render(decoder, dom);
+	return TRUE;
 }
 
 static void

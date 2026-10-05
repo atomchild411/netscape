@@ -62,6 +62,7 @@ extern PRLogModuleInfo* NSJAVA;
 #include "Mnfrc.h"
 #include "Mnfrf.h"
 #include "Mnffbu.h"
+#include "libmocha.h"
 #endif
 
 #ifndef MAX
@@ -1896,6 +1897,7 @@ XFE_LayoutNewDocument (MWContext *context, URL_Struct *url,
 
     XtVaGetValues (CONTEXT_DATA (context)->scrolled,
 		 XmNwidth, &w, XmNheight, &h, 0);
+    CONTEXT_DATA (context)->laid_out_scrolled_width = w;
   }
   if (!w || !h) abort ();
 
@@ -3071,6 +3073,12 @@ fe_ReLayout (MWContext *context, NET_ReloadMethod force_reload)
                                          NULL);
   History_entry *he = SHIST_GetCurrent (&context->hist);
   URL_Struct *url;
+
+#ifdef NS_QUICKJS
+  /* a document scripts changed is laid out from their DOM */
+  if (force_reload == NET_RESIZE_RELOAD && LM_RelayoutFromDom (context))
+    return;
+#endif
   /* We must store the position into the History_entry before making
      a URL_Struct from it. */
   if (e && he)

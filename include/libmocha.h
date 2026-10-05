@@ -448,6 +448,10 @@ LO_ResizeSelectOptions(lo_FormElementSelectData *selectData);
 /* Layout is about to lay TAG out: add it to the document's DOM (and set
  * tag->dom_node). */
 extern void LM_DomTag(MWContext *context, PA_Tag *tag);
+
+/* The window is being laid out again for a new size: if scripts changed
+ * the document, lay out their tree instead (TRUE: done). */
+extern JSBool LM_RelayoutFromDom(MWContext *context);
 #endif
 
 extern void
