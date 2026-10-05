@@ -49,6 +49,7 @@ typedef struct {
     MWContext	* context;
     char	* content_type;
     int16	  char_set;
+    PRBool	  failed;	/* an HTTP error: its page is not a script */
 } MochaStream;
 
 typedef struct {
@@ -103,6 +104,8 @@ mocha_process(NET_StreamClass *stream, const char *str, int32 len)
 {
     MochaStream * mocha_stream = (MochaStream *) stream->data_object;
 
+    if (mocha_stream->failed)
+        return len;
     mocha_stream->length += len;
     if (!mocha_stream->buffer) {
         mocha_stream->buffer = (char *)PR_Malloc(mocha_stream->length);
@@ -332,6 +335,7 @@ NET_CreateMochaConverter(FO_Present_Types format_out,
     mocha_stream->context = context;
     mocha_stream->content_type = PL_strdup(url_struct->content_type);
     mocha_stream->char_set = net_check_for_charset(url_struct);
+    mocha_stream->failed = url_struct->server_status >= 400;
 
     /* Get the origin from the URL struct. We don't have to free origin
      * here because url_struct->origin_url owns it.

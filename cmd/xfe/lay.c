@@ -434,6 +434,19 @@ XFE_GetTextInfo (MWContext *context,
     }
   while (remaining > 0);
 
+  if (getenv ("QJS_DOM_TRACE") && text->text_attr->point_size > 0)
+    {
+      FILE *t = fopen (getenv ("QJS_DOM_TRACE"), "a");
+      if (t)
+	{
+	  fprintf (t, "textinfo pt %g cs %d a %d d %d w %d font %p '%.*s'\n",
+		   (double) text->text_attr->point_size, text->text_attr->charset,
+		   (int) text_info->ascent, (int) text_info->descent,
+		   (int) text_info->max_width, (void *) font,
+		   length > 20 ? 20 : length, (char *) text->text);
+	  fclose (t);
+	}
+    }
   /* What is the return value expected to be?
      layout/layout.c doesn't seem to use it. */
   return 0;

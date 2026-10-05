@@ -114,6 +114,23 @@ PUBLIC CONST char *XP_AppPlatform = 0;
 
 PUBLIC char * FE_UsersFromField=0;    /* User's name/email address not used yet */
 
+
+/* A script's or a style sheet's load (SCRIPT SRC=, LINK): an error reply's
+ * page goes to the script or sheet stream, which drops it, not into the
+ * window as a document. */
+PRIVATE Bool
+net_preset_is_not_a_page(URL_Struct *URL_s)
+{
+    const char *t = URL_s->content_type;
+
+    if (!URL_s->preset_content_type || !t)
+        return FALSE;
+    return !XP_STRCASECMP(t, APPLICATION_JAVASCRIPT) ||
+           !XP_STRCASECMP(t, "text/javascript") ||
+           !XP_STRCASECMP(t, "application/javascript") ||
+           !XP_STRCASECMP(t, TEXT_CSS) || !XP_STRCASECMP(t, TEXT_JSSS);
+}
+
 PRIVATE XP_List * http_connection_list=0;
 PRIVATE IdentifyMeEnum http_identification_method = DoNotIdentifyMe;
 PRIVATE Bool sendRefererHeader=TRUE;
@@ -327,7 +344,7 @@ NET_getInternetKeyword(const URL_Struct *inURL, char *outKeyword, int16 inMaxLen
 
     key = outKeyword;
     for (ctr = 0; ctr < inURL->all_headers.empty_index; ctr++)
-        if (PL_strcasecmp(inURL->all_headers.key[ctr], INTERNET_KEYWORD_METATAG) == 0) {
+        if (XP_STRCASECMP(inURL->all_headers.key[ctr], INTERNET_KEYWORD_METATAG) == 0) {
             /* add a separator, if appropriate */
             if (key > outKeyword)
                 if (key < keyEnd-1) {
@@ -2381,7 +2398,8 @@ net_parse_first_http_line (ActiveEntry *ce)
                 
               case 4:    /* client error */
 
-        ce->URL_s->preset_content_type = FALSE;
+        if (!net_preset_is_not_a_page(ce->URL_s))
+          ce->URL_s->preset_content_type = FALSE;
 
                 if(ce->URL_s->server_status == 401 && !cd->acting_as_proxy)
                   {
@@ -2431,7 +2449,8 @@ net_parse_first_http_line (ActiveEntry *ce)
               case 5:    /* server error code */
                 TRACEMSG(("Server did not return success: NOT CACHEING!!!"));
         ce->URL_s->dont_cache = TRUE;
-        ce->URL_s->preset_content_type = FALSE;
+        if (!net_preset_is_not_a_page(ce->URL_s))
+          ce->URL_s->preset_content_type = FALSE;
 #ifdef DO_503
         if(ce->URL_s->server_status == 503 && !cd->acting_as_proxy)
           {
@@ -2707,7 +2726,7 @@ net_setup_http_stream(ActiveEntry * ce)
       if ( (redirectPort = PL_strchr(redirectURLHost, ':')) != NULL)
         *redirectPort='\0';
 
-      if(PL_strcasecmp(curURLHost, redirectURLHost)) {
+      if(XP_STRCASECMP(curURLHost, redirectURLHost)) {
         PR_Free(curURLHost);
         PR_Free(redirectURLHost);
         PR_FREEIF(ce->URL_s->redirecting_url);
@@ -3892,11 +3911,11 @@ net_InterruptHTTP(ActiveEntry * ce)
    */
   if(cd->next_state == HTTP_PULL_DATA 
     && ce->URL_s->content_type
-     && !PL_strcasecmp(ce->URL_s->content_type, TEXT_HTML))
+     && !XP_STRCASECMP(ce->URL_s->content_type, TEXT_HTML))
     {
     char buffer[127];
 
-    if(!PL_strcasecmp(ce->URL_s->content_type, TEXT_HTML))
+    if(!XP_STRCASECMP(ce->URL_s->content_type, TEXT_HTML))
       PR_snprintf(buffer, sizeof(buffer),
         XP_GetString(XP_HR_TRANSFER_INTERRUPTED));
     else

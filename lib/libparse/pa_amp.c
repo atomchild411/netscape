@@ -342,6 +342,35 @@ pa_NumericCharacterReference(unsigned char *in, uint32 inlen, uint32 *inread,
 	uint32		i;
 	uint32	ncr;
 
+	/* &#xHHHH; (hexadecimal, HTML 4) */
+	if (inlen > 0 && (in[0] == 'x' || in[0] == 'X')) {
+		for (i = 1; i < inlen; i++) {
+			b = in[i];
+			if (!XP_IS_DIGIT(b) && !((b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')))
+				break;
+		}
+		if (i == 1) {
+			*inread = 0;
+			return '?';
+		}
+		if ((i >= inlen) && (!force)) {
+			*inread = (inlen + 1);
+			return '?';
+		}
+		inlen = i;
+		ncr = 0;
+		for (i = 1; i < inlen; i++) {
+			b = in[i];
+			ncr = 16 * ncr + (XP_IS_DIGIT(b) ? b - '0' :
+							  (b >= 'a' ? b - 'a' + 10 : b - 'A' + 10));
+			if (ncr > 0x10ffff)
+				ncr = 0x10ffff;
+		}
+		*inread = i;
+		if (ncr & 0xffff0000)
+			return '?';
+		return (uint16)ncr;
+	}
 
 	for( i = 0; i < inlen; i++ ){
 		b = in[i];

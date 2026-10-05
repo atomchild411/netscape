@@ -1538,6 +1538,7 @@ typedef struct {
     ScriptData *data;
     char *buf;
     int32 len, size;
+    XP_Bool failed;             /* an HTTP error: its page is not a sheet */
 } lo_CSSStream;
 
 static int
@@ -1570,7 +1571,7 @@ lo_css_complete(NET_StreamClass *stream)
     lo_CSSStream *s = (lo_CSSStream *) stream->data_object;
     lo_TopState *top_state = lo_FetchTopState(XP_DOCID(s->context));
 
-    if (top_state && top_state->style_stack && s->buf)
+    if (top_state && top_state->style_stack && s->buf && !s->failed)
         SML_AddStyleSheet(top_state->style_stack, s->data->url, NULL,
                           s->data->buffer, s->buf, s->len);
     XP_FREEIF(s->buf);
@@ -1596,6 +1597,7 @@ LO_CSSConverter(FO_Present_Types format_out, void *data_object,
         return NULL;
     s->context = context;
     s->data = (ScriptData *) url_struct->fe_data;
+    s->failed = url_struct->server_status >= 400;
     return NET_NewStream("CSS", (MKStreamWriteFunc) lo_css_write,
                          (MKStreamCompleteFunc) lo_css_complete,
                          (MKStreamAbortFunc) lo_css_abort,

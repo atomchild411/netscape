@@ -102,7 +102,9 @@ static const char nscss_ua_sheet[] =
 	" display: table-column-group;"
 	" }\n"
 	/* what HTML hides (scripts set hidden; template content is inert) */
-	"[hidden], template { display: none; }\n";
+	"[hidden], template, dialog:not([open]) { display: none; }\n"
+	/* a closed details shows its summary only */
+	"details:not([open]) > :not(summary) { display: none; }\n";
 
 struct NSCSS_Doc {
 	css_select_ctx	*ctx;		/* user agent sheet and the page's */
@@ -113,6 +115,8 @@ struct NSCSS_Doc {
 	int32			 n_sheets;		/* reload adds them again */
 	css_unit_ctx	 unit;
 	css_media		 media;
+	struct nscss_var *vars;		/* custom properties (nscss_vars_*) */
+	int32			 n_vars, vars_cap;
 };
 
 typedef struct {
@@ -731,6 +735,396 @@ nscss_parse(const char *url, const char *charset, XP_Bool inline_style,
 	return s;
 }
 
+/* ---- custom properties ------------------------------------------------------
+ *
+ * libcss 0.9.2 has no custom properties: a declaration using var() is
+ * dropped.  So before a sheet is parsed, its var() references are replaced
+ * by the values the page's sheets give the properties.  One value per
+ * property for the whole document: what :root, html, body or * set wins
+ * over what other selectors set (themes, components); later over earlier.
+ * Values set inside @media for a dark colour scheme or for print are left
+ * out.  Approximate (a property set differently on some elements gets the
+ * document-wide value), but the usual use -- design tokens on :root -- comes
+ * out right.
+ */
+
+struct nscss_var {
+	char	*name;
+	char	*value;
+	int		 prio;
+};
+
+static void
+nscss_var_set(NSCSS_Doc *doc, const char *name, int32 nlen,
+			  const char *value, int32 vlen, int prio)
+{
+	int32 i;
+	char *v;
+
+	while (vlen > 0 && isspace((unsigned char) value[vlen - 1]))
+		vlen--;
+	while (vlen > 0 && isspace((unsigned char) *value)) {
+		value++;
+		vlen--;
+	}
+	/* !important is not part of the value */
+	if (vlen >= 10 && !strncasecomp(value + vlen - 10, "!important", 10)) {
+		vlen -= 10;
+		while (vlen > 0 && isspace((unsigned char) value[vlen - 1]))
+			vlen--;
+	}
+	for (i = 0; i < doc->n_vars; i++)
+		if ((int32) XP_STRLEN(doc->vars[i].name) == nlen &&
+			!XP_STRNCMP(doc->vars[i].name, name, nlen))
+			break;
+	if (i < doc->n_vars && doc->vars[i].prio > prio)
+		return;
+	v = (char *) XP_ALLOC(vlen + 1);
+	if (!v)
+		return;
+	XP_MEMCPY(v, value, vlen);
+	v[vlen] = '\0';
+	if (i < doc->n_vars) {
+		XP_FREE(doc->vars[i].value);
+		doc->vars[i].value = v;
+		doc->vars[i].prio = prio;
+		return;
+	}
+	if (doc->n_vars == doc->vars_cap) {
+		int32 cap = doc->vars_cap ? doc->vars_cap * 2 : 64;
+		struct nscss_var *a = (struct nscss_var *)
+			XP_REALLOC(doc->vars, cap * sizeof *a);
+		if (!a) {
+			XP_FREE(v);
+			return;
+		}
+		doc->vars = a;
+		doc->vars_cap = cap;
+	}
+	doc->vars[i].name = (char *) XP_ALLOC(nlen + 1);
+	if (!doc->vars[i].name) {
+		XP_FREE(v);
+		return;
+	}
+	XP_MEMCPY(doc->vars[i].name, name, nlen);
+	doc->vars[i].name[nlen] = '\0';
+	doc->vars[i].value = v;
+	doc->vars[i].prio = prio;
+	doc->n_vars++;
+}
+
+static const char *
+nscss_var_get(NSCSS_Doc *doc, const char *name, int32 nlen)
+{
+	int32 i;
+
+	for (i = 0; i < doc->n_vars; i++)
+		if ((int32) XP_STRLEN(doc->vars[i].name) == nlen &&
+			!XP_STRNCMP(doc->vars[i].name, name, nlen))
+			return doc->vars[i].value;
+	return NULL;
+}
+
+/* Skip a comment or string starting at d[i]; the index after it. */
+static int32
+nscss_skip(const char *d, int32 len, int32 i)
+{
+	if (d[i] == '/' && i + 1 < len && d[i + 1] == '*') {
+		for (i += 2; i + 1 < len && !(d[i] == '*' && d[i + 1] == '/'); i++)
+			;
+		return i + 2 < len ? i + 2 : len;
+	}
+	if (d[i] == '"' || d[i] == '\'') {
+		char q = d[i];
+		for (i++; i < len && d[i] != q; i++)
+			if (d[i] == '\\')
+				i++;
+		return i + 1 < len ? i + 1 : len;
+	}
+	return i + 1;
+}
+
+static XP_Bool
+nscss_rootish(const char *sel, int32 n)
+{
+	int32 i = 0;
+
+	while (i < n && isspace((unsigned char) sel[i]))
+		i++;
+	sel += i;
+	n -= i;
+	return (n >= 5 && !strncasecomp(sel, ":root", 5)) ||
+		   (n >= 4 && !strncasecomp(sel, "html", 4)) ||
+		   (n >= 4 && !strncasecomp(sel, "body", 4)) ||
+		   (n >= 5 && !strncasecomp(sel, ":host", 5)) ||
+		   (n >= 1 && sel[0] == '*');
+}
+
+/* Record the custom properties DATA sets. */
+static void
+nscss_vars_collect(NSCSS_Doc *doc, const char *d, int32 len)
+{
+	/* the blocks we are in: for each, whether its declarations count, and
+	 * how much (0: skipped) */
+	int prio[32];
+	int depth = 0;
+	int32 i = 0, start = 0;
+
+	prio[0] = 1;
+	while (i < len) {
+		char c = d[i];
+		if ((c == '/' && i + 1 < len && d[i + 1] == '*') || c == '"' || c == '\'') {
+			i = nscss_skip(d, len, i);
+			continue;
+		}
+		if (c == '{') {
+			const char *pre = d + start;
+			int32 n = i - start, k;
+			int p = depth > 0 ? prio[depth] : 1;
+
+			while (n > 0 && isspace((unsigned char) *pre)) {
+				pre++;
+				n--;
+			}
+			if (n > 0 && pre[0] == '@') {
+				/* a group: @media dark / print, @keyframes, @font-face
+				 * declarations do not count */
+				for (k = 0; k + 4 < n; k++)
+					if (!strncasecomp(pre + k, "dark", 4) ||
+						!strncasecomp(pre + k, "print", 5))
+						p = 0;
+				if (n >= 10 && !strncasecomp(pre, "@keyframes", 10))
+					p = 0;
+				if (n >= 10 && !strncasecomp(pre, "@font-face", 10))
+					p = 0;
+				if (n >= 6 && !strncasecomp(pre, "@media", 6) && p)
+					p = prio[depth] ? prio[depth] : 1;
+			} else if (p) {
+				p = nscss_rootish(pre, n) ? 2 : 1;
+				/* a dark theme's values ([data-color-mode=dark], .dark ...) */
+				for (k = 0; k + 4 <= n; k++)
+					if (!strncasecomp(pre + k, "dark", 4)) {
+						p = 0;
+						break;
+					}
+			}
+			if (depth < 31)
+				prio[++depth] = p;
+			i++;
+			start = i;
+			continue;
+		}
+		if (c == '}') {
+			if (depth > 0)
+				depth--;
+			i++;
+			start = i;
+			continue;
+		}
+		if (c == ';') {
+			i++;
+			start = i;
+			continue;
+		}
+		/* a declaration "--name: value" in a block whose declarations count */
+		if (depth > 0 && prio[depth] && c == '-' && i + 1 < len && d[i + 1] == '-') {
+			int32 j = start;
+			while (j < i && isspace((unsigned char) d[j]))
+				j++;
+			if (j == i) {
+				int32 nstart = i, nend, vstart, paren = 0;
+				while (i < len && d[i] != ':' && d[i] != ';' && d[i] != '}' &&
+					   !isspace((unsigned char) d[i]))
+					i++;
+				nend = i;
+				while (i < len && isspace((unsigned char) d[i]))
+					i++;
+				if (i < len && d[i] == ':') {
+					i++;
+					vstart = i;
+					while (i < len) {
+						if (d[i] == '"' || d[i] == '\'' ||
+							(d[i] == '/' && i + 1 < len && d[i + 1] == '*')) {
+							i = nscss_skip(d, len, i);
+							continue;
+						}
+						if (d[i] == '(' || d[i] == '[' || (d[i] == '{' && paren > 0))
+							paren++;
+						else if ((d[i] == ')' || d[i] == ']' || d[i] == '}') && paren > 0)
+							paren--;
+						else if (!paren && (d[i] == ';' || d[i] == '}'))
+							break;
+						i++;
+					}
+					nscss_var_set(doc, d + nstart, nend - nstart, d + vstart,
+								  i - vstart, prio[depth]);
+				}
+				continue;
+			}
+		}
+		i++;
+	}
+}
+
+typedef struct {
+	char	*buf;
+	int32	 len, cap;
+} nscss_buf;
+
+static void
+nscss_buf_add(nscss_buf *b, const char *s, int32 n)
+{
+	if (b->len + n + 1 > b->cap) {
+		int32 cap = (b->len + n + 1) * 2 + 256;
+		char *p = (char *) XP_REALLOC(b->buf, cap);
+		if (!p)
+			return;
+		b->buf = p;
+		b->cap = cap;
+	}
+	XP_MEMCPY(b->buf + b->len, s, n);
+	b->len += n;
+	b->buf[b->len] = '\0';
+}
+
+/* Append D with its var() references replaced. */
+static void
+nscss_vars_subst(NSCSS_Doc *doc, nscss_buf *out, const char *d, int32 len,
+				 int level)
+{
+	int32 i = 0, from = 0;
+
+	while (i < len) {
+		if ((d[i] == '/' && i + 1 < len && d[i + 1] == '*') ||
+			d[i] == '"' || d[i] == '\'') {
+			i = nscss_skip(d, len, i);
+			continue;
+		}
+		if ((d[i] == 'v' || d[i] == 'V') && i + 4 <= len &&
+			!strncasecomp(d + i, "var(", 4) &&
+			(i == 0 || !(isalnum((unsigned char) d[i - 1]) || d[i - 1] == '-'))) {
+			int32 j = i + 4, paren = 1, comma = -1, nstart, nend;
+			const char *v;
+
+			while (j < len && paren) {
+				if (d[j] == '"' || d[j] == '\'') {
+					j = nscss_skip(d, len, j);
+					continue;
+				}
+				if (d[j] == '(')
+					paren++;
+				else if (d[j] == ')')
+					paren--;
+				else if (d[j] == ',' && paren == 1 && comma < 0)
+					comma = j;
+				if (paren)
+					j++;
+			}
+			if (paren) {		/* unterminated: leave it */
+				i = len;
+				break;
+			}
+			nstart = i + 4;
+			while (nstart < j && isspace((unsigned char) d[nstart]))
+				nstart++;
+			nend = comma >= 0 ? comma : j;
+			while (nend > nstart && isspace((unsigned char) d[nend - 1]))
+				nend--;
+			v = level < 8 ? nscss_var_get(doc, d + nstart, nend - nstart) : NULL;
+			if (v || comma >= 0) {
+				nscss_buf_add(out, d + from, i - from);
+				if (v)
+					nscss_vars_subst(doc, out, v, XP_STRLEN(v), level + 1);
+				else
+					nscss_vars_subst(doc, out, d + comma + 1, j - comma - 1,
+									 level + 1);
+				from = j + 1;
+			}
+			i = j + 1;
+			continue;
+		}
+		i++;
+	}
+	nscss_buf_add(out, d + from, len - from);
+}
+
+/* Cascade layers (@layer) are newer than libcss, which drops the block
+ * and every rule in it: keep the rules (in source order, which is how
+ * layers usually come anyway), drop the layer statements. */
+static char *
+nscss_unlayer(const char *d, int32 len, int32 *out_len)
+{
+	nscss_buf b = { NULL, 0, 0 };
+	int32 i = 0, from = 0, depth = 0;
+	int32 drop[32];			/* brace depths whose closing brace goes */
+	int ndrop = 0;
+
+	while (i < len) {
+		char c = d[i];
+		if ((c == '/' && i + 1 < len && d[i + 1] == '*') || c == '"' || c == '\'') {
+			i = nscss_skip(d, len, i);
+			continue;
+		}
+		if (c == '@' && i + 6 <= len && !strncasecomp(d + i, "@layer", 6) &&
+			(i + 6 == len || !isalnum((unsigned char) d[i + 6]))) {
+			int32 j = i + 6;
+			while (j < len && d[j] != '{' && d[j] != ';' && d[j] != '}')
+				j++;
+			nscss_buf_add(&b, d + from, i - from);
+			if (j < len && d[j] == '{') {
+				depth++;
+				if (ndrop < 32)
+					drop[ndrop++] = depth;
+			}
+			i = j < len && d[j] != '}' ? j + 1 : j;
+			from = i;
+			continue;
+		}
+		if (c == '{')
+			depth++;
+		else if (c == '}') {
+			if (ndrop > 0 && drop[ndrop - 1] == depth) {
+				ndrop--;
+				nscss_buf_add(&b, d + from, i - from);
+				from = i + 1;
+			}
+			depth--;
+		}
+		i++;
+	}
+	if (!b.buf)
+		return NULL;
+	nscss_buf_add(&b, d + from, len - from);
+	*out_len = b.len;
+	return b.buf;
+}
+
+/* DATA with what libcss cannot read made readable (@layer unwrapped, var()
+ * resolved): allocated, or NULL if there was nothing to do. */
+static char *
+nscss_vars_resolve(NSCSS_Doc *doc, const char *data, int32 len, int32 *out_len)
+{
+	nscss_buf b = { NULL, 0, 0 };
+	int32 i, ulen = 0;
+	char *u = nscss_unlayer(data, len, &ulen);
+
+	if (u) {
+		data = u;
+		len = ulen;
+	}
+	for (i = 0; i + 4 <= len; i++)
+		if (!strncasecomp(data + i, "var(", 4))
+			break;
+	if (i + 4 > len) {
+		*out_len = ulen;
+		return u;
+	}
+	nscss_vars_subst(doc, &b, data, len, 0);
+	XP_FREEIF(u);
+	*out_len = b.len;
+	return b.buf;
+}
+
 NSCSS_Doc *
 NSCSS_NewDoc(void)
 {
@@ -772,6 +1166,11 @@ NSCSS_DestroyDoc(NSCSS_Doc *doc)
 		css_stylesheet_destroy(doc->sheets[i]);
 	XP_FREEIF(doc->sheets);
 	XP_FREEIF(doc->sheet_hashes);
+	for (i = 0; i < doc->n_vars; i++) {
+		XP_FREE(doc->vars[i].name);
+		XP_FREE(doc->vars[i].value);
+	}
+	XP_FREEIF(doc->vars);
 	if (doc->ua_sheet)
 		css_stylesheet_destroy(doc->ua_sheet);
 	XP_FREE(doc);
@@ -812,7 +1211,13 @@ NSCSS_AddSheet(NSCSS_Doc *doc, const char *url, const char *charset,
 	for (i = 0; i < doc->n_sheets; i++)
 		if (doc->sheet_hashes[i] == h)
 			return;
-	s = nscss_parse(url, charset, FALSE, data, len);
+	nscss_vars_collect(doc, data, len);
+	{
+		int32 rlen = 0;
+		char *r = nscss_vars_resolve(doc, data, len, &rlen);
+		s = nscss_parse(url, charset, FALSE, r ? r : data, r ? rlen : len);
+		XP_FREEIF(r);
+	}
 	if (!s)
 		return;
 	a = (css_stylesheet **) XP_REALLOC(doc->sheets,
@@ -857,9 +1262,13 @@ NSCSS_OpenNode(NSCSS_Doc *doc, NSCSS_Node *parent, const char *name,
 	nscss_set_classes(n, class_name);
 	if (attrs && attrs_len > 0)
 		nscss_parse_attrs(n, attrs, attrs_len);
-	if (style && *style)
+	if (style && *style) {
+		int32 rlen = 0;
+		char *r = nscss_vars_resolve(doc, style, XP_STRLEN(style), &rlen);
 		n->inline_style = nscss_parse(base_url, "UTF-8", TRUE,
-									  style, XP_STRLEN(style));
+									  r ? r : style, r ? rlen : XP_STRLEN(style));
+		XP_FREEIF(r);
+	}
 	if (parent) {
 		n->parent = nscss_ref(parent);
 		n->prev = parent->last_child;	/* the parent's reference moves */
