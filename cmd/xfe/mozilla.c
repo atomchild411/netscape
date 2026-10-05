@@ -2089,6 +2089,8 @@ main
       NNTP = PR_NewLogModule("nntp");
 #endif
 
+      /* Pthreads NSPR does not initialize itself on PR_SetThreadGCAble. */
+      PR_Init(PR_USER_THREAD, PR_PRIORITY_NORMAL, 0);
       PR_SetThreadGCAble();
 	  PR_SetThreadPriority(PR_GetCurrentThread(), PR_PRIORITY_LAST);
 	  PR_BlockClockInterrupts();
