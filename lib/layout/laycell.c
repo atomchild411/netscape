@@ -816,10 +816,21 @@ lo_SmallSquishSubDocToCell(MWContext *context, lo_DocState *state,
 	}
 
 	cell = (LO_CellStruct *)lo_NewElement(context, state, LO_CELL, NULL, 0);
+	if (cell == NULL)
+	{
+		return(NULL);
+	}
 	cell->isCaption = FALSE;
 
     cell->cell_bg_layer = NULL;
     cell->cell_inflow_layer = NULL;
+
+	/* lo_NewElement does not clear (it reuses recycled elements): a
+	 * caption's cell is given no table cell record, and discarding the
+	 * document freed whatever pointer the old element left there. */
+	cell->table = NULL;
+	cell->table_row = NULL;
+	cell->table_cell = NULL;
 
 	lo_CreateCellFromSubDoc (context, state, subdoc, cell, ptr_dx, ptr_dy );
 

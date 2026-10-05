@@ -1665,7 +1665,12 @@ void lo_rl_AppendLinefeedAndFlushLine( MWContext *context, lo_DocState *state, L
 void lo_AppendFloatInLineList( lo_DocState *state, LO_Element *ele, LO_Element *restOfLine)
 {
 	LO_Element *eptr;
-	LO_FloatStruct *float_dummy = XP_NEW_ZAP(LO_FloatStruct);
+	/* A whole LO_Element: the dummy is recycled with the line it is on,
+	 * and lo_NewElement hands recycled elements out as any type (a cell
+	 * written over a LO_FloatStruct-sized block ran into the next one). */
+	LO_FloatStruct *float_dummy = (LO_FloatStruct *) XP_NEW_ZAP(LO_Element);
+	if (float_dummy == NULL)
+		return;
 	float_dummy->float_ele = ele;
 	float_dummy->lo_any.type = LO_FLOAT;
 	float_dummy->lo_any.ele_id = NEXT_ELEMENT;
