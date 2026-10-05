@@ -1454,6 +1454,69 @@ UnloadUCS2TableSet(uTableSet *tableset,int from)
  *         strlen of Locally Encoded string 
  *         
  */
+/*
+ * Latin-1 stand-ins for common punctuation outside Latin-1 (dashes, curly
+ * quotes, ellipsis, special spaces...), which the X fonts here lack: drawn
+ * as these rather than as '?'.
+ */
+static const struct { uint16 ucs2; const char *str; } intl_latin1_standins[] = {
+	{ 0x2002, " " }, { 0x2003, " " }, { 0x2004, " " }, { 0x2005, " " },
+	{ 0x2006, " " }, { 0x2007, " " }, { 0x2008, " " }, { 0x2009, " " },
+	{ 0x200A, " " }, { 0x200B, "" }, { 0x200C, "" }, { 0x200D, "" },
+	{ 0x200E, "" }, { 0x200F, "" },
+	{ 0x2010, "-" }, { 0x2011, "-" }, { 0x2012, "-" }, { 0x2013, "-" },
+	{ 0x2014, "--" }, { 0x2015, "--" },
+	{ 0x2018, "'" }, { 0x2019, "'" }, { 0x201A, "," }, { 0x201B, "'" },
+	{ 0x201C, "\"" }, { 0x201D, "\"" }, { 0x201E, "\"" }, { 0x201F, "\"" },
+	{ 0x2020, "+" }, { 0x2022, "\267" }, { 0x2026, "..." },
+	{ 0x202F, " " }, { 0x2030, "%o" }, { 0x2032, "'" }, { 0x2033, "\"" },
+	{ 0x2039, "<" }, { 0x203A, ">" }, { 0x2044, "/" }, { 0x205F, " " },
+	{ 0x2060, "" }, { 0x20AC, "EUR" }, { 0x2116, "No" }, { 0x2122, "TM" },
+	{ 0x2190, "<-" }, { 0x2191, "^" }, { 0x2192, "->" }, { 0x2193, "v" },
+	{ 0x2194, "<->" }, { 0x21D2, "=>" }, { 0x2212, "-" }, { 0x2215, "/" },
+	{ 0x2217, "*" }, { 0x2219, "\267" }, { 0x2248, "~" }, { 0x2260, "!=" },
+	{ 0x2264, "<=" }, { 0x2265, ">=" }, { 0x22C5, "\267" },
+	{ 0x25B2, "^" }, { 0x25B3, "^" }, { 0x25B4, "^" }, { 0x25B5, "^" },
+	{ 0x25B6, ">" }, { 0x25B8, ">" }, { 0x25BA, ">" },
+	{ 0x25BC, "v" }, { 0x25BD, "v" }, { 0x25BE, "v" }, { 0x25BF, "v" },
+	{ 0x25C0, "<" }, { 0x25C2, "<" }, { 0x25C4, "<" },
+	{ 0x25CB, "o" }, { 0x25CF, "\267" }, { 0x25E6, "o" },
+	{ 0x2605, "*" }, { 0x2606, "*" }, { 0x2630, "=" },
+	{ 0x2713, "v" }, { 0x2714, "v" }, { 0x2715, "x" }, { 0x2716, "x" },
+	{ 0x2717, "x" }, { 0x2718, "x" },
+	{ 0xFB01, "fi" }, { 0xFB02, "fl" }, { 0xFEFF, "" }, { 0xFFFD, "?" }
+};
+
+static XP_Bool
+intl_latin1_standin(uint16 ucs2, unsigned char *out, int16 *out_len)
+{
+	int lo = 0, hi = sizeof intl_latin1_standins /
+					 sizeof intl_latin1_standins[0] - 1;
+
+	if (ucs2 < 0x2002)
+		return FALSE;
+	while (lo <= hi) {
+		int mid = (lo + hi) / 2;
+
+		if (intl_latin1_standins[mid].ucs2 == ucs2) {
+			const char *s = intl_latin1_standins[mid].str;
+			int16 n = 0;
+
+			while (s[n]) {
+				out[n] = (unsigned char) s[n];
+				n++;
+			}
+			*out_len = n;
+			return TRUE;
+		}
+		if (intl_latin1_standins[mid].ucs2 < ucs2)
+			lo = mid + 1;
+		else
+			hi = mid - 1;
+	}
+	return FALSE;
+}
+
 PUBLIC int
 utf8_to_local_encoding(const unsigned char *utf8p, const int utf8len,
 						unsigned char *LE_string, int LE_string_len,
@@ -1479,6 +1542,8 @@ utf8_to_local_encoding(const unsigned char *utf8p, const int utf8len,
 	}
 	else if (utf8_char_len == -2) /* not enough input characters */
 		return 0;
+	else if (intl_latin1_standin(ucs2_char, tmpbuf, &out_char_len))
+		seg_encoding = CS_LATIN1;
 	else {
 		result = UCS2_To_Other(ucs2_char, tmpbuf, (uint16)10,
 											(uint16*)&out_char_len, (int16*)&seg_encoding);
@@ -1503,6 +1568,8 @@ utf8_to_local_encoding(const unsigned char *utf8p, const int utf8len,
 		}
 		else if (utf8_char_len == -2) /* no input/output space */
 			break;
+		else if (intl_latin1_standin(ucs2_char, tmpbuf, &out_char_len))
+			out_char_encoding = CS_LATIN1;
 		else {
 			/*
 			 * convert UCS2 to local encoding

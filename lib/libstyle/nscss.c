@@ -73,6 +73,7 @@
 #define BORDERCOLOR_PROP		"borderColor"
 #define FLOAT_PROP				"align"
 #define CLEAR_PROP				"clear"
+#define NS_CLEAR_AFTER_PROP		"nsClearAfter"
 #define VALIGN_PROP				"verticalAlign"
 #define BGCOLOR_PROP			"backgroundColor"
 #define BGIMAGE_PROP			"backgroundImage"
@@ -1773,7 +1774,10 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		node->flex_row = fd == CSS_FLEX_DIRECTION_ROW ||
 						 fd == CSS_FLEX_DIRECTION_ROW_REVERSE ||
 						 fd == CSS_FLEX_DIRECTION_INHERIT;
-	} else if (t == CSS_DISPLAY_GRID || t == CSS_DISPLAY_INLINE_GRID) {
+	} else if (t == CSS_DISPLAY_GRID || t == CSS_DISPLAY_INLINE_GRID ||
+			   /* an inline block's own blocks (a details' summary, a
+			    * badge's divs) stay on its line */
+			   t == CSS_DISPLAY_INLINE_BLOCK) {
 		node->flex_row = TRUE;
 	}
 	if ((node->parent && node->parent->flex_row &&
@@ -1803,9 +1807,6 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	case CSS_DISPLAY_INLINE_GRID:
 	case CSS_DISPLAY_INLINE_TABLE:
 		nscss_set(style, DISPLAY_PROP, "inline");
-		/* layout draws a list item's bullet whatever its display */
-		if (!strcasecomp(lwc_string_data(node->name), "li"))
-			nscss_set(style, LISTSTYLETYPE_PROP, "none");
 		break;
 	default:					/* the marker, or table parts */
 		break;
@@ -1826,6 +1827,11 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		}
 		nscss_set(style, nscss_inherited[i].name, v);
 	}
+	/* Layout draws a list item's bullet whatever its display: an inline
+	 * item has none (after the inherited list-style-type, which would
+	 * give it one back). */
+	if (!block && !strcasecomp(lwc_string_data(node->name), "li"))
+		nscss_set(style, LISTSTYLETYPE_PROP, "none");
 
 	/* Links take their colour from linkColor and visitedColor. */
 	if (node->parent && (v = fmt_color(doc, st, buf)) != NULL) {
@@ -1850,7 +1856,11 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		}
 	}
 
-	if (block)
+	/* An absolutely positioned box is out of the flow; layout puts its
+	 * content in the flow, but drawing its box there (borders, sizes,
+	 * margins: often a decorative backdrop) gets in the way. */
+	if (block && css_computed_position(st) != CSS_POSITION_ABSOLUTE &&
+		css_computed_position(st) != CSS_POSITION_FIXED)
 		nscss_export_box(doc, node, st, style);
 
 	switch (css_computed_vertical_align(st, &len, &unit)) {
@@ -1886,8 +1896,11 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		}
 	}
 
-	/* Images float; layout floats other elements only as blocks. */
-	if (block || nscss_name_in(node, img_tags)) {
+	/* Images float; layout floats other elements only as blocks.  An
+	 * absolutely positioned element does not float (CSS 2.1 9.7). */
+	if ((block || nscss_name_in(node, img_tags)) &&
+		css_computed_position(st) != CSS_POSITION_ABSOLUTE &&
+		css_computed_position(st) != CSS_POSITION_FIXED) {
 		switch (css_computed_float(st)) {
 		case CSS_FLOAT_LEFT: nscss_set(style, FLOAT_PROP, "left"); break;
 		case CSS_FLOAT_RIGHT: nscss_set(style, FLOAT_PROP, "right"); break;
@@ -1987,6 +2000,41 @@ nscss_export_box(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	}
 }
 
+/* A block that encloses its floats: overflow other than visible (a new
+ * block formatting context), or a clearfix (an ::after with content that
+ * clears).  Layout ends it below the floats that started inside it. */
+static void
+nscss_encloses_floats(NSCSS_Node *node, const css_computed_style *st,
+					  const css_computed_style *after, StyleStruct *style)
+{
+	uint8_t d;
+
+	if (!st)
+		return;
+	d = css_computed_display_static(st);
+	if (d == CSS_DISPLAY_NONE || !nscss_is_block(node, d))
+		return;
+	if (after) {
+		const css_computed_content_item *items = NULL;
+
+		if (css_computed_content(after, &items) == CSS_CONTENT_SET &&
+			css_computed_clear(after) != CSS_CLEAR_NONE &&
+			css_computed_clear(after) != CSS_CLEAR_INHERIT) {
+			nscss_set(style, NS_CLEAR_AFTER_PROP, "both");
+			return;
+		}
+	}
+	switch (css_computed_overflow_y(st)) {
+	case CSS_OVERFLOW_HIDDEN:
+	case CSS_OVERFLOW_SCROLL:
+	case CSS_OVERFLOW_AUTO:
+		nscss_set(style, NS_CLEAR_AFTER_PROP, "both");
+		break;
+	default:
+		break;
+	}
+}
+
 void
 NSCSS_StyleNode(NSCSS_Doc *doc, NSCSS_Node *node, StyleStruct *style)
 {
@@ -2014,6 +2062,8 @@ NSCSS_StyleNode(NSCSS_Doc *doc, NSCSS_Node *node, StyleStruct *style)
 	nscss_log_node(node);
 	nscss_export(doc, node, res->styles[CSS_PSEUDO_ELEMENT_NONE],
 				 ua ? ua->styles[CSS_PSEUDO_ELEMENT_NONE] : NULL, style);
+	nscss_encloses_floats(node, res->styles[CSS_PSEUDO_ELEMENT_NONE],
+						  res->styles[CSS_PSEUDO_ELEMENT_AFTER], style);
 	if (ua)
 		css_select_results_destroy(ua);
 	css_select_results_destroy(res);

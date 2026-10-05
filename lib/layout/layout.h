@@ -750,6 +750,8 @@ struct lo_TopState_struct {
     PRPackedBool have_title;	/* set by first <TITLE> */
     PRPackedBool in_form;	/* true if in <FORM>...</FORM> */
     PRPackedBool implicit_form;	/* the form is one a stray control opened */
+    uint32 inline_lists;	/* per open list (bit = depth): laid out inline */
+    int32 list_depth;		/* lists open, for inline_lists */
     uint8 body_attr;		/* What attributes were set by BODY */
     char *unknown_head_tag;	/* ignore content in this case if non-NULL */
     char *base_target;		/* Base target of urls in this document */

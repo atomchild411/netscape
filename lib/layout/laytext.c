@@ -3900,6 +3900,26 @@ lo_PlaceBullet(MWContext *context, lo_DocState *state)
 	LO_TextAttr *tptr;
 	PA_Block buff;
 	char *str;
+	int bullet_type = state->list_stack->bullet_type;
+
+	/* the style sheet's list-style-type */
+	if(state->top_state && state->top_state->style_stack)
+	{
+		StyleStruct *style_struct = STYLESTACK_GetStyleByIndex(
+											state->top_state->style_stack, 0);
+		char *list_style_prop = style_struct ?
+			STYLESTRUCT_GetString(style_struct, LIST_STYLE_TYPE_STYLE) : NULL;
+
+		if(list_style_prop)
+		{
+			bullet_type = lo_list_bullet_type(list_style_prop, P_UNUM_LIST);
+			XP_FREE(list_style_prop);
+		}
+	}
+	/* No marker: nothing on the line, so a float that follows still
+	 * starts there. */
+	if(bullet_type == BULLET_NONE)
+		return;
 
 	bullet = (LO_BulletStruct *)lo_NewElement(context, state,
                                               LO_BULLET, NULL, 0);
@@ -3919,27 +3939,7 @@ lo_PlaceBullet(MWContext *context, lo_DocState *state)
 
 	bullet->level = state->list_stack->level;
 
-	bullet->bullet_type = state->list_stack->bullet_type;
-
-    /* try and get a bullet type from style sheets */
-    if(state && state->top_state && state->top_state->style_stack)
-    {
-        StyleStruct *style_struct = STYLESTACK_GetStyleByIndex(
-                                            state->top_state->style_stack, 0);
-
-        if(style_struct)
-        {
-            char *list_style_prop = STYLESTRUCT_GetString(
-                                            style_struct,
-                                            LIST_STYLE_TYPE_STYLE);
-			if(list_style_prop)
-			{
-				bullet->bullet_type = lo_list_bullet_type(list_style_prop,
-                                                          P_UNUM_LIST);
-				XP_FREE(list_style_prop);
-			}
-        }
-    }
+	bullet->bullet_type = bullet_type;
 
 	bullet->ele_attrmask = 0;
 
@@ -4049,6 +4049,26 @@ lo_PlaceBulletStr(MWContext *context, lo_DocState *state)
     int bullet_type;
 	int32 line_height, baseline;
 
+    bullet_type = state->list_stack->bullet_type;
+	if(state->top_state && state->top_state->style_stack)
+	{
+		StyleStruct *style_struct = STYLESTACK_GetStyleByIndex(
+										state->top_state->style_stack, 0);
+		char *list_style_prop = style_struct ?
+			STYLESTRUCT_GetString(style_struct, LIST_STYLE_TYPE_STYLE) : NULL;
+
+		if(list_style_prop)
+		{
+			/* no marker (list-style-type: none): place nothing */
+			if(lo_list_bullet_type(list_style_prop, P_NUM_LIST) == BULLET_NONE)
+			{
+				XP_FREE(list_style_prop);
+				return;
+			}
+			XP_FREE(list_style_prop);
+		}
+	}
+
 	bullet_text = (LO_TextStruct *)lo_NewElement(context, state,
                                                  LO_TEXT, NULL, 0);
 	if (bullet_text == NULL)
@@ -4059,7 +4079,6 @@ lo_PlaceBulletStr(MWContext *context, lo_DocState *state)
 		return;
 	}
 
-    bullet_type = state->list_stack->bullet_type;
 
     /* try and get a bullet type from style sheets */
     if(state && state->top_state && state->top_state->style_stack)

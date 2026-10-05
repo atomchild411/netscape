@@ -695,6 +695,43 @@ LO_ImplicitPop(MWContext *context, lo_DocState **state, PA_Tag *tag)
 			if(tag->is_end)
 				return FALSE;
 
+#ifdef NS_LIBCSS
+			/* close the open item of this list, not one outside it */
+			if((*state)->top_state->style_stack &&
+			   SML_UsesLibCSS((*state)->top_state->style_stack))
+			{
+				StyleAndTagStack *stack = (*state)->top_state->style_stack;
+				static const char *const stops[] = {
+					"ul", "ol", "menu", "dir", "dl", "table", "td", "th", NULL
+				};
+				TagStruct *t;
+				int32 i, k;
+
+				for(i = 0; (t = STYLESTACK_GetTagByIndex(stack, i)) != NULL; i++)
+				{
+					if(!t->name)
+						continue;
+					if(!strcasecomp(t->name, "li"))
+					{
+						for(; i >= 0; i--)
+						{
+							TagStruct *top = STYLESTACK_GetTagByIndex(stack, 0);
+							TagType type = (top && top->name) ?
+								pa_tokenize_tag(top->name) : P_UNKNOWN;
+
+							LO_PopStyleTagByIndex(context, state, type, 0);
+						}
+						break;
+					}
+					for(k = 0; stops[k]; k++)
+						if(!strcasecomp(t->name, stops[k]))
+							break;
+					if(stops[k])
+						break;
+				}
+				return TRUE;
+			}
+#endif
 			LO_PopAllTagsAbove(context, 
 				   			state, 
 				   			P_LIST_ITEM,
@@ -784,6 +821,36 @@ LO_PopStyleTagByIndex(MWContext *context, lo_DocState **state,
 		}
 		XP_FREE(page_break_property);
 	}
+
+#ifdef NS_LIBCSS
+	/* the element encloses the floats that started inside it: end below
+	 * them (before any wrapper table closes, whose cell they are in) */
+	if((property = STYLESTRUCT_GetString(top_style, NS_FLOAT_MARK_STYLE)) != NULL)
+	{
+		unsigned long left_mark = 0, right_mark = 0;
+		lo_MarginStack *m;
+		int32 y_max = -1;
+
+		sscanf(property, "%lx %lx", &left_mark, &right_mark);
+		XP_FREE(property);
+		/* floats wait for the end of their line to be placed */
+		lo_SetSoftLineBreakState(context, *state, FALSE, 1);
+		for(m = (*state)->left_margin_stack;
+			m && (unsigned long)m != left_mark; m = m->next)
+			if(m->y_max > y_max)
+				y_max = m->y_max;
+		for(m = (*state)->right_margin_stack;
+			m && (unsigned long)m != right_mark; m = m->next)
+			if(m->y_max > y_max)
+				y_max = m->y_max;
+		if(y_max > (*state)->y)
+		{
+			(*state)->y = y_max;
+			lo_FindLineMargins(context, *state, TRUE);
+			(*state)->x = (*state)->left_margin;
+		}
+	}
+#endif
 
 	/* calculate the bottom margin here since we need the original font
 	 * information before closing the table, but don't apply it until

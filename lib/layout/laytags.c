@@ -2778,6 +2778,21 @@ lo_SetNewMarginsForStyle(lo_DocState *state,
 
         /* set left and right margins */
         lo_PushList(state, tag, QUOTE_NONE);
+		/* on a list, the entry stands for the list itself (pushed just
+		 * before): its marker, count and level, not a fresh list's */
+		if (state->list_stack && state->list_stack->next &&
+			state->list_stack->next->type == tag->type &&
+			(tag->type == P_NUM_LIST || tag->type == P_UNUM_LIST ||
+			 tag->type == P_MENU || tag->type == P_DIRECTORY ||
+			 tag->type == P_DESC_LIST))
+		{
+			lo_ListStack *list = state->list_stack->next;
+
+			state->list_stack->bullet_type = list->bullet_type;
+			state->list_stack->value = list->value;
+			state->list_stack->level = list->level;
+			state->list_stack->compact = list->compact;
+		}
 
 		if(left_margin_offset)
 		{
@@ -3987,17 +4002,23 @@ lo_SetStyleSheetRandomProperties(MWContext *context,
 	{
 		if (!strcasecomp(property, "left"))
 		{
-			lo_HardLineBreak(context, state, FALSE);
+			/* a new line, not an empty one at a line's start */
+			if (state->at_begin_line == FALSE)
+				lo_HardLineBreak(context, state, FALSE);
 			lo_ClearToLeftMargin(context, state);
 		}
 		else if (!strcasecomp(property, "right"))
 		{
-			lo_HardLineBreak(context, state, FALSE);
+			/* a new line, not an empty one at a line's start */
+			if (state->at_begin_line == FALSE)
+				lo_HardLineBreak(context, state, FALSE);
 			lo_ClearToRightMargin(context, state);
 		}
 		else if (!strcasecomp(property, "both"))
 		{
-			lo_HardLineBreak(context, state, FALSE);
+			/* a new line, not an empty one at a line's start */
+			if (state->at_begin_line == FALSE)
+				lo_HardLineBreak(context, state, FALSE);
 			lo_ClearToBothMargins(context, state);
 		}
 		/* note that "none" means to not clear or BR at all */
@@ -4096,6 +4117,28 @@ lo_SetStyleSheetProperties(MWContext *context,
 	if(!state)
 		return;
 
+#ifdef NS_LIBCSS
+	/* An element that encloses its floats (overflow other than visible, a
+	 * clearfix ::after): note the floats open now, so its end clears only
+	 * those that start inside it. */
+	{
+		char *clear_after = STYLESTRUCT_GetString(style_struct,
+												  NS_CLEAR_AFTER_STYLE);
+
+		if(clear_after)
+		{
+			char mark[40];
+
+			PR_snprintf(mark, sizeof mark, "%lx %lx",
+						(unsigned long)state->left_margin_stack,
+						(unsigned long)state->right_margin_stack);
+			STYLESTRUCT_SetString(style_struct, NS_FLOAT_MARK_STYLE, mark,
+								  MAX_STYLESTRUCT_PRIORITY);
+			XP_FREE(clear_after);
+		}
+	}
+#endif
+
 	lo_SetStyleSheetRandomProperties(context, state, style_struct, tag);
 
 }
@@ -4122,7 +4165,11 @@ lo_IsEmptyTag(TagType type)
        || type == P_EMBED
        || type == P_KEYGEN
        || type == P_JAVA_APPLET
+#ifndef NS_LIBCSS
+       /* with libcss a list item holds its content (li .tags, li > a):
+        * the next item or the list's end closes it (LO_ImplicitPop) */
        || type == P_LIST_ITEM
+#endif
        || type == P_BASEFONT
        || type == P_AREA
        || type == P_DESC_TITLE
@@ -4661,6 +4708,39 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 			state->top_state->in_head = FALSE;
 			state->top_state->in_body = TRUE;
 
+			/* A list the style sheet makes inline (a row of tags or
+			 * menu items): no indent and no line breaks, its items
+			 * flow as inline items do. */
+			if (tag->is_end == FALSE)
+			{
+				lo_TopState *ts = state->top_state;
+				/* hidden (display: none here or above) lists the same:
+				 * no indent or breaks for content nobody sees */
+				Bool hidden = state->hide_content ||
+							  LO_CheckForContentHiding(state);
+				Bool inl = hidden || lo_TopStyleIsInline(state);
+
+				if (ts->list_depth < 32 && inl)
+					ts->inline_lists |= (uint32)1 << ts->list_depth;
+				else if (ts->list_depth < 32)
+					ts->inline_lists &= ~((uint32)1 << ts->list_depth);
+				ts->list_depth++;
+				if (inl)
+				{
+					if (!hidden && state->at_begin_line == FALSE)
+						state->x += FEUNITS_X(8, context);
+					break;
+				}
+			}
+			else if (state->top_state->list_depth > 0)
+			{
+				lo_TopState *ts = state->top_state;
+
+				ts->list_depth--;
+				if (ts->list_depth < 32 &&
+					(ts->inline_lists & ((uint32)1 << ts->list_depth)))
+					break;
+			}
 			if (tag->is_end == FALSE)
 			{
 				char *bullet_type;
@@ -6790,7 +6870,9 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 					}
 					else if (!strcasecomp((char *)buff, "prefetch"))
 					{
-						char *prefetchURL;
+						/* (both start NULL: used when the link has no SRC,
+						 * as modern rel=prefetch links have not) */
+						char *prefetchURL = NULL;
 						char *str;
 						PA_Block buff2 = lo_FetchParamValue(context, tag, PARAM_SRC);
 
@@ -6815,7 +6897,7 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 #ifdef PRIVACY_POLICIES
 					else if (!strcasecomp((char *)buff, "privacypolicy"))
 					{
-						char *policyURL;
+						char *policyURL = NULL;
 						char *str;
 						PA_Block buff2 = lo_FetchParamValue(context, tag, PARAM_SRC);
 						History_entry *hist;

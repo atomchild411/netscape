@@ -42,6 +42,11 @@ extern XP_Bool LO_IsStyledUnknownTag(lo_DocState *state, PA_Tag *tag, XP_Bool *i
 
 #define STYLE_NEED_TO_RESET_PRE "RESET_PRE"
 
+/* from libcss (nscss.c): the element encloses its floats; the floats open
+ * when it started (layout's own note) */
+#define NS_CLEAR_AFTER_STYLE	"nsClearAfter"
+#define NS_FLOAT_MARK_STYLE		"FLOAT_MARK"
+
 #define FONTSIZE_STYLE			"fontSize"
 #define FONTFACE_STYLE			"fontFamily"
 #define FONTWEIGHT_STYLE		"fontWeight"
