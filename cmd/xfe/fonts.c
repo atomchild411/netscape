@@ -1620,9 +1620,22 @@ fe_LoadFontFromFace(MWContext *context, LO_TextAttr *attr, int16 *charset, char 
 	if (font)
 	{
                 fe_Font platform_font = font;
+                fe_Font ft_font = NULL;
+
                 if (FE_FONT_TYPE_RENDERABLE != font_type)
                     font_type = fe_CharSetInfoArray[(*charset) & 0xff].type;
+                /* Text in Latin-1 or UTF-8 is drawn with FreeType when it
+                 * is on (ftfonts.c); the X font stays for Motif widgets. */
+                if (FE_FONT_TYPE_RENDERABLE != font_type &&
+                    ((saved_charset & 0xff) == (CS_LATIN1 & 0xff) ||
+                     (saved_charset & 0xff) == (CS_UTF8 & 0xff)))
+                    ft_font = fe_FTLoadFont(context, net_font_face, points,
+                                            size, fontmask);
                 font = WrapPlatformFont(platform_font, font_type);
+                if (font && ft_font) {
+                    ((fe_FontWrap *) font)->platform_font = ft_font;
+                    ((fe_FontWrap *) font)->distinguisher = FE_FONT_TYPE_FT;
+                }
 		if (attr)
 		{
 			attr->FE_Data = (void *) font;
@@ -1646,6 +1659,8 @@ static fe_Font WrapPlatformFont(fe_Font platform_font, unsigned char font_type)
 
     fw->platform_font = platform_font;
     fw->distinguisher = font_type;
+    fw->x_font = platform_font;
+    fw->x_type = font_type;
 
     return (fe_Font) fw;
 }
@@ -1762,11 +1777,12 @@ void FE_ReleaseTextAttrFeData(MWContext *context, LO_TextAttr *attr)
     fw = (fe_FontWrap *) attr->FE_Data;
     if (! fw) return;
 
-    switch (fw->distinguisher) {
+    switch (fw->x_type) {
     case FE_FONT_TYPE_X8:
     case FE_FONT_TYPE_X16:
+        /* (a FreeType font is kept for the session: only its X font) */
         dpy = XtDisplay(CONTEXT_WIDGET(context));
-        xfs = (XFontStruct *) fw->platform_font;
+        xfs = (XFontStruct *) fw->x_font;
         FreePlatformFont(dpy, xfs, attr);
         break;
 

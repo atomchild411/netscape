@@ -138,6 +138,7 @@ CSRCS		= \
 		  icons.c \
 		  images.c \
 		  lay.c \
+		  ftfonts.c \
 		  mozilla.c \
 		  prefs.c \
 		  prefdialogs.c \
@@ -710,6 +711,9 @@ OTHER_LIBS	:= -lquickjs -ldom -lhubbub -lparserutils -lwapcaplet -ldl $(OTHER_LI
 endif
 ifdef NS_WEBP
 OTHER_LIBS	:= -lwebp $(OTHER_LIBS)
+endif
+ifdef NS_FREETYPE
+OTHER_LIBS	:= -lfreetype $(OTHER_LIBS)
 endif
 endif
 else

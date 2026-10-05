@@ -45,6 +45,7 @@ XP_BEGIN_PROTOS
 #ifndef NO_WEB_FONTS
 #define FE_FONT_TYPE_RENDERABLE 0x8
 #endif
+#define FE_FONT_TYPE_FT		0x10	/* FreeType, ftfonts.c */
 
 
 /* the following are macros so that we avoid the overhead of function calls */
@@ -78,6 +79,11 @@ do                                                                            \
                 (*fe_CharSetFuncsArray[fe_CharSetInfoArray[(charset) & 0xff]. \
                         info].textExtents)(platform_font, (string), (len),    \
                         &direction, (fontAscent), (fontDescent), (overall));  \
+        }                                                                     \
+        else if (FE_FONT_TYPE_FT == font_type)                                \
+        {                                                                     \
+                fe_FTTextExtents((charset), platform_font, (string), (len),   \
+                        (fontAscent), (fontDescent), (overall));              \
         }                                                                     \
         else                                                                  \
         {                                                                     \
@@ -142,6 +148,10 @@ do                                                                            \
                 fe_GenericFontExtents(charset, platform_font,                 \
                                         (fontAscent), (fontDescent));         \
         }                                                                     \
+        else if (FE_FONT_TYPE_FT == font_type)                                \
+        {                                                                     \
+                fe_FTFontExtents(platform_font, (fontAscent), (fontDescent)); \
+        }                                                                     \
         else                                                                  \
         {                                                                     \
                 *(fontAscent) =                                               \
@@ -198,6 +208,11 @@ do                                                                            \
                 (*fe_CharSetFuncsArray[fe_CharSetInfoArray[(charset) & 0xff]. \
                         info].drawString)((dpy), (d), platform_font,          \
                         (gc), (x), (y), (string), (len));                     \
+        }                                                                     \
+        else if (FE_FONT_TYPE_FT == font_type)                                \
+        {                                                                     \
+                fe_FTDrawString((charset), (dpy), (d), platform_font, (gc),   \
+                        (GC) 0, (x), (y), (string), (len));                   \
         }                                                                     \
         else                                                                  \
         {                                                                     \
@@ -267,6 +282,11 @@ do                                                                            \
                 (*fe_CharSetFuncsArray[fe_CharSetInfoArray[(charset) & 0xff]. \
                         info].drawImageString)((dpy), (d), platform_font,     \
                         (gc), (gc2), (x), (y), (string), (len));              \
+        }                                                                     \
+        else if (FE_FONT_TYPE_FT == font_type)                                \
+        {                                                                     \
+                fe_FTDrawString((charset), (dpy), (d), platform_font, (gc),   \
+                        (gc2), (x), (y), (string), (len));                    \
         }                                                                     \
         else                                                                  \
         {                                                                     \
@@ -355,7 +375,7 @@ do                                                                            \
         fe_CharSetFuncs entry =                                               \
            fe_CharSetFuncsArray[fe_CharSetInfoArray[(charset) & 0xff].info];  \
                                                                               \
-        platform_font = ((fe_FontWrap *) font)->platform_font;                \
+        platform_font = ((fe_FontWrap *) font)->x_font;                       \
                                                                               \
         (fontlist) =                                                          \
         (* (entry.nonEditGetFontList))(charset, platform_font,                \
@@ -379,7 +399,7 @@ do                                                                            \
 #define FE_NONEDIT_TO_XMSTRING(charset, font, string, len)                    \
         (*fe_CharSetFuncsArray[fe_CharSetInfoArray[(charset) & 0xff].         \
                         info].nonEditToXmString)( (charset),                  \
-                           (fe_Font) (((fe_FontWrap *) font)->platform_font), \
+                           (fe_Font) (((fe_FontWrap *) font)->x_font),        \
                                       (string),                               \
                                       (len)                                   \
                               )                                              
@@ -402,10 +422,26 @@ typedef struct fe_FontWrap
 {
         unsigned char    distinguisher;
         void *           platform_font;
+        void *           x_font;	/* an X font (Motif widgets): the
+                                         * platform font, or for a FreeType
+                                         * one the X font it stands for */
+        unsigned char    x_type;	/* x_font's FE_FONT_TYPE_ */
 } fe_FontWrap;
 #endif
 
 typedef void *fe_Font;
+
+/* FreeType fonts (ftfonts.c; without NS_FREETYPE, stubs) */
+extern XP_Bool fe_FTEnabled(void);
+extern fe_Font fe_FTLoadFont(MWContext *context, const char *family,
+                             int points, int sizeNum, int fontmask);
+extern void fe_FTFontExtents(fe_Font font, int *ascent, int *descent);
+extern void fe_FTTextExtents(int16 charset, fe_Font font, char *string,
+                             int len, int *ascent, int *descent,
+                             XCharStruct *overall);
+extern void fe_FTDrawString(int16 charset, Display *dpy, Drawable d,
+                            fe_Font font, GC gc, GC bg_gc, int x, int y,
+                            char *string, int len);
 
 typedef struct fe_FontFace fe_FontFace;
 

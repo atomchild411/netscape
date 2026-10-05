@@ -475,6 +475,15 @@ ifdef NS_QUICKJS
 DEFINES		+= -DNS_QUICKJS
 endif
 
+# Page text drawn with FreeType (cmd/xfe/ftfonts.c): with pkgsrc's X and
+# Motif, which bring FreeType along; not yet for the IRIX Motif build.
+ifndef NS_IRIX_MOTIF
+NS_FREETYPE	= 1
+endif
+ifdef NS_FREETYPE
+DEFINES		+= -DNS_FREETYPE
+endif
+
 # WebP images by libwebp (modules/libimg/src/ibuf.cpp)
 ifdef NS_WEBP
 DEFINES		+= -DNS_WEBP
