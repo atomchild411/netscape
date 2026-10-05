@@ -4177,6 +4177,25 @@ static void lo_ProcessFontTag( lo_DocState *state, PA_Tag *tag, int32 fontSpecif
  *
  * Returns: Nothing
  *************************************/
+/* Does the style sheet make the tag being laid out inline? */
+Bool
+lo_TopStyleIsInline(lo_DocState *state)
+{
+	StyleStruct *style;
+	char *prop;
+	Bool inl = FALSE;
+
+	if (!state->top_state || !state->top_state->style_stack)
+		return FALSE;
+	style = STYLESTACK_GetStyleByIndex(state->top_state->style_stack, 0);
+	if (style && (prop = STYLESTRUCT_GetString(style, DISPLAY_STYLE)) != NULL)
+	{
+		inl = !strcasecomp(prop, INLINE_STYLE);
+		XP_FREE(prop);
+	}
+	return inl;
+}
+
 void
 lo_LayoutTag(MWContext *context, lo_DocState *state, PA_Tag *tag)
 {
@@ -4673,6 +4692,11 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 			 */
 			state->top_state->in_head = FALSE;
 			state->top_state->in_body = TRUE;
+
+			/* an inline item (a flex row's, nscss.c): a gap before it */
+			if (tag->is_end == FALSE && state->at_begin_line == FALSE &&
+				lo_TopStyleIsInline(state))
+				state->x += FEUNITS_X(12, context);
 
 			if (state->in_paragraph != FALSE)
 			{
@@ -6967,6 +6991,30 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 			state->top_state->in_head = FALSE;
 			state->top_state->in_body = TRUE;
 
+			/* A DIV the style sheet makes inline (a flex or grid item,
+			 * nscss.c) breaks no line, at its start or (its alignment
+			 * entry says, its style being gone by then) its end. */
+			if ((tag->is_end == FALSE) ? lo_TopStyleIsInline(state) :
+				(state->align_stack != NULL &&
+				 state->align_stack->type == LO_INLINE_DIV))
+			{
+				if (tag->is_end == FALSE)
+				{
+					/* a gap between it and what is before it */
+					if (state->at_begin_line == FALSE)
+						state->x += FEUNITS_X(8, context);
+					lo_PushAlignment(state, LO_INLINE_DIV,
+						state->align_stack != NULL ?
+						state->align_stack->alignment : LO_ALIGN_LEFT);
+				}
+				else
+				{
+					lo_AlignStack *aptr = lo_PopAlignment(state);
+					if (aptr != NULL)
+						XP_DELETE(aptr);
+				}
+				break;
+			}
 			if (state->in_paragraph != FALSE)
 			{
 				lo_CloseParagraph(context, &state, tag, 2);

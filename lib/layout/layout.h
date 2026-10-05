@@ -177,6 +177,9 @@ typedef struct lo_FontStack_struct {
 } lo_FontStack;
 
 
+/* lo_AlignStack type of a DIV laid out inline (laytags.c) */
+#define LO_INLINE_DIV	(P_MAX + 1)
+
 typedef struct lo_AlignStack_struct {
 	intn type;
 	int32 alignment;
@@ -944,6 +947,7 @@ extern lo_ListStack *lo_DefaultList(lo_DocState *);
 extern void lo_PushList(lo_DocState *, PA_Tag *, int8);
 extern lo_ListStack *lo_PopList(lo_DocState *, PA_Tag *);
 
+extern Bool lo_TopStyleIsInline(lo_DocState *state);
 extern void lo_PushAlignment(lo_DocState *, intn, int32);
 extern lo_AlignStack *lo_PopAlignment(lo_DocState *);
 

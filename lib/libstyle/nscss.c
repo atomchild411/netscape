@@ -138,6 +138,7 @@ struct NSCSS_Node {
 	int32			 n_attrs;
 	css_stylesheet	*inline_style;
 	void			*node_data;	/* libcss's */
+	XP_Bool			 flex_row;	/* lays its children out in a row */
 };
 
 static css_select_handler nscss_handler;
@@ -844,20 +845,34 @@ nscss_skip(const char *d, int32 len, int32 i)
 	return i + 1;
 }
 
-static XP_Bool
+/* How much a selector's custom properties count: 2 for the document
+ * itself (:root, html, body, * alone, in any of a list's selectors), 1
+ * for anything else (components; the document under a condition: a theme
+ * class, an attribute). */
+static int
 nscss_rootish(const char *sel, int32 n)
 {
 	int32 i = 0;
 
-	while (i < n && isspace((unsigned char) sel[i]))
-		i++;
-	sel += i;
-	n -= i;
-	return (n >= 5 && !strncasecomp(sel, ":root", 5)) ||
-		   (n >= 4 && !strncasecomp(sel, "html", 4)) ||
-		   (n >= 4 && !strncasecomp(sel, "body", 4)) ||
-		   (n >= 5 && !strncasecomp(sel, ":host", 5)) ||
-		   (n >= 1 && sel[0] == '*');
+	while (i < n) {
+		int32 j, k;
+		while (i < n && (isspace((unsigned char) sel[i]) || sel[i] == ','))
+			i++;
+		j = i;
+		while (j < n && sel[j] != ',')
+			j++;
+		k = j;
+		while (k > i && isspace((unsigned char) sel[k - 1]))
+			k--;
+		if ((k - i == 5 && !strncasecomp(sel + i, ":root", 5)) ||
+			(k - i == 4 && !strncasecomp(sel + i, "html", 4)) ||
+			(k - i == 4 && !strncasecomp(sel + i, "body", 4)) ||
+			(k - i == 5 && !strncasecomp(sel + i, ":host", 5)) ||
+			(k - i == 1 && sel[i] == '*'))
+			return 2;
+		i = j;
+	}
+	return 1;
 }
 
 /* Record the custom properties DATA sets. */
@@ -900,10 +915,12 @@ nscss_vars_collect(NSCSS_Doc *doc, const char *d, int32 len)
 				if (n >= 6 && !strncasecomp(pre, "@media", 6) && p)
 					p = prio[depth] ? prio[depth] : 1;
 			} else if (p) {
-				p = nscss_rootish(pre, n) ? 2 : 1;
-				/* a dark theme's values ([data-color-mode=dark], .dark ...) */
+				p = nscss_rootish(pre, n);
+				/* a dark theme's values ([data-color-mode=dark], .dark,
+				 * .skin-theme-clientpref-night ...) */
 				for (k = 0; k + 4 <= n; k++)
-					if (!strncasecomp(pre + k, "dark", 4)) {
+					if (!strncasecomp(pre + k, "dark", 4) ||
+						(k + 5 <= n && !strncasecomp(pre + k, "night", 5))) {
 						p = 0;
 						break;
 					}
@@ -1683,6 +1700,24 @@ nscss_is_block(NSCSS_Node *node, uint8_t display)
 static void nscss_export_box(NSCSS_Doc *doc, NSCSS_Node *node,
 							 const css_computed_style *st, StyleStruct *style);
 
+/* Tags layout lays out as blocks whatever their display (lists move the
+ * margin, tables and headings break lines): never flex row items. */
+static XP_Bool
+nscss_layout_block(const char *n)
+{
+	static const char *const tags[] = {
+		"ul", "ol", "dl", "menu", "dir", "table", "form", "p", "pre",
+		"blockquote", "center", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
+		"address", "listing", "xmp", "multicol", NULL
+	};
+	int k;
+
+	for (k = 0; tags[k]; k++)
+		if (!strcasecomp(n, tags[k]))
+			return TRUE;
+	return FALSE;
+}
+
 static void
 nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 			 const css_computed_style *ua_root, StyleStruct *style)
@@ -1713,6 +1748,23 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		nscss_set(style, DISPLAY_PROP, "none");
 		return;					/* layout applies nothing else */
 	}
+	/* Layout has no flex or grid layout.  A row of flex items, or a grid's
+	 * items, flow side by side as inline content does: closer than a
+	 * column of blocks (a navigation bar laid out as a list). */
+	if (t == CSS_DISPLAY_FLEX || t == CSS_DISPLAY_INLINE_FLEX) {
+		uint8_t fd = css_computed_flex_direction(st);
+		node->flex_row = fd == CSS_FLEX_DIRECTION_ROW ||
+						 fd == CSS_FLEX_DIRECTION_ROW_REVERSE ||
+						 fd == CSS_FLEX_DIRECTION_INHERIT;
+	} else if (t == CSS_DISPLAY_GRID || t == CSS_DISPLAY_INLINE_GRID) {
+		node->flex_row = TRUE;
+	}
+	if (node->parent && node->parent->flex_row &&
+		!nscss_layout_block(lwc_string_data(node->name))) {
+		nscss_set(style, DISPLAY_PROP, "inline");
+		block = FALSE;
+		t = CSS_DISPLAY_INLINE;
+	} else
 	switch (t) {
 	case CSS_DISPLAY_BLOCK:
 	case CSS_DISPLAY_FLEX:
