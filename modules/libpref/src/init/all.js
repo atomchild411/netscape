@@ -48,8 +48,11 @@ pref("general.help_source.url",             "");
 pref("general.fullcircle_enable",           true);
 pref("general.fullcircle_collect_ns_data",  false);
 
-pref("browser.enable_style_sheets",         true);
 pref("browser.startup.page",                1);     // 0 = blank, 1 = home, 2 = last
+// Style sheets go through the 1998 CSS-to-JavaScript (JSSS) translation, which
+// can stall a page for good on today's CSS (the layout waits; nothing more is
+// read).  Off until CSS has a replacement; Edit > Preferences turns them on.
+pref("browser.enable_style_sheets",         false);
 // home.netscape.com is long gone: start on the local about: page.
 pref("browser.startup.homepage",            "about:");
 pref("browser.startup.homepage_override",   true);
