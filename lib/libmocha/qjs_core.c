@@ -263,20 +263,56 @@ qjs_GetContext(MochaDecoder *decoder)
 
 extern void qjs_ClearTimeouts(MochaDecoder *decoder);
 
+/* A context dropped while its scripts ran (a script whose document went
+ * from under it): freed once they have returned. */
+typedef struct {
+	JSContext	*cx;
+	void		*dom;
+} qjs_DeadContext;
+
+static void
+qjs_free_dead(void *arg)
+{
+	qjs_DeadContext *dead = (qjs_DeadContext *) arg;
+
+	if (qjs_running) {
+		qjs_Later(qjs_free_dead, dead);
+		return;
+	}
+	JS_FreeContext(dead->cx);
+	JS_RunGC(qjs_Runtime());
+	qjs_DomFreeDetached(dead->dom);
+	XP_FREE(dead);
+}
+
 void
 qjs_DropContext(MochaDecoder *decoder)
 {
+	JSContext *cx;
+
 	if (!decoder)
 		return;
-	if (decoder->js_context) {
+	if ((cx = decoder->js_context) != NULL) {
 		qjs_ClearTimeouts(decoder);
 		qjs_DropLoads(decoder);
 		/* the DOM's node objects first: they hold the tree's nodes */
 		qjs_DomDropObjects(decoder);
-		JS_FreeContext(decoder->js_context);
 		decoder->js_context = NULL;
 		if (decoder->window_context)
 			decoder->window_context->mocha_context = NULL;
+		if (qjs_running) {
+			qjs_DeadContext *dead = XP_NEW_ZAP(qjs_DeadContext);
+			qjs_Log("JavaScript: the document went while a script ran");
+			/* its natives see no window from now on */
+			JS_SetContextOpaque(cx, NULL);
+			if (dead) {
+				dead->cx = cx;
+				dead->dom = qjs_DomDetach(decoder);
+				qjs_Later(qjs_free_dead, dead);
+			}
+			return;
+		}
+		JS_FreeContext(cx);
 		JS_RunGC(qjs_Runtime());
 	}
 	qjs_DomFree(decoder);

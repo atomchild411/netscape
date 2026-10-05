@@ -538,8 +538,10 @@ qjs_timer_fire(void *closure)
 {
 	qjs_Timer *t = (qjs_Timer *) closure;
 	JSContext *cx = t->cx;
+	MochaDecoder *d = t->decoder;
 	JSValue fn = JS_DupValue(cx, t->fn), rv;
 	XP_Bool repeat = t->repeat;
+	int32 id = t->id;
 
 	t->fe_timer = NULL;
 	if (repeat)
@@ -547,11 +549,11 @@ qjs_timer_fire(void *closure)
 	rv = qjs_Call(cx, fn, JS_UNDEFINED, 0, NULL);
 	JS_FreeValue(cx, rv);
 	JS_FreeValue(cx, fn);
-	/* the call may have cleared it (clearTimeout) or dropped the context */
+	/* the call may have cleared it (clearTimeout): T may be gone */
 	if (!repeat) {
 		qjs_Timer *p;
-		for (p = (qjs_Timer *) t->decoder->timeouts; p; p = p->next)
-			if (p == t) {
+		for (p = (qjs_Timer *) d->timeouts; p; p = p->next)
+			if (p == t && p->id == id) {
 				qjs_timer_free(t);
 				break;
 			}

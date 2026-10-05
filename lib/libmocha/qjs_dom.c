@@ -194,14 +194,42 @@ qjs_DomDropObjects(MochaDecoder *decoder)
 		qjs_dom_free_wrappers(dom);
 }
 
+static void qjs_dom_free(qjs_Dom *dom);
+
 void
 qjs_DomFree(MochaDecoder *decoder)
 {
 	qjs_Dom *dom = qjs_dom_of(decoder);
-	uint32 i;
 
 	if (!dom)
 		return;
+	decoder->qjs_dom = NULL;
+	qjs_dom_free(dom);
+}
+
+/* Take the tree from the window (its context is going, later). */
+void *
+qjs_DomDetach(MochaDecoder *decoder)
+{
+	qjs_Dom *dom = qjs_dom_of(decoder);
+
+	if (dom)
+		decoder->qjs_dom = NULL;
+	return dom;
+}
+
+void
+qjs_DomFreeDetached(void *dom)
+{
+	if (dom)
+		qjs_dom_free((qjs_Dom *) dom);
+}
+
+static void
+qjs_dom_free(qjs_Dom *dom)
+{
+	uint32 i;
+
 	if (dom->render_timer)
 		FE_ClearTimeout(dom->render_timer);
 	qjs_dom_free_wrappers(dom);
@@ -216,7 +244,6 @@ qjs_DomFree(MochaDecoder *decoder)
 	if (dom->current_script)
 		dom_node_unref(dom->current_script);
 	dom_node_unref(dom->doc);
-	decoder->qjs_dom = NULL;
 	XP_FREE(dom);
 }
 

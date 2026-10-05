@@ -263,7 +263,10 @@ pa_new_document(FO_Present_Types format_out,
 		 * this same window, so that we have a clear path
 		 * to load this new document
 		 */
-		NET_SilentInterruptWindow(window_id);
+		/* (not for the same document laid out again: what it is
+		 * loading -- images, scripts' fetches -- it still wants) */
+		if (!url_struct->resize_reload)
+			NET_SilentInterruptWindow(window_id);
 		is_inline_stream = FALSE;
     }
     

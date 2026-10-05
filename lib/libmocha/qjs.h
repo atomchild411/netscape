@@ -55,6 +55,8 @@ extern JSValue qjs_Call(JSContext *cx, JSValueConst fn, JSValueConst this_val,
 extern void qjs_InitDom(JSContext *cx, JSValueConst ns);
 extern void qjs_DomDropObjects(MochaDecoder *decoder);
 extern void qjs_DomFree(MochaDecoder *decoder);
+extern void *qjs_DomDetach(MochaDecoder *decoder);
+extern void qjs_DomFreeDetached(void *dom);
 extern void qjs_DomResizeReload(MochaDecoder *decoder);
 extern JSBool qjs_DomEvent(MWContext *context, LO_Element *element,
 						   JSEvent *event);
