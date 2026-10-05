@@ -61,7 +61,7 @@ char * FE_GetDirectoryPath( su_DirSpecID folderID)
 					Home = "";
 				else if (!strcmp (Home, "/"))
 					Home = "";
-    				PR_snprintf(Path, MAXPATHLEN, "%.900s/.netscape/plugins/", Home);
+    				PR_snprintf(Path, MAXPATHLEN, "%.900s/" NS_PROFILE_DIR "/plugins/", Home);
 			}
 			directory = XP_STRDUP( Path );
 		}
@@ -141,7 +141,7 @@ char * FE_GetDirectoryPath( su_DirSpecID folderID)
 				else if (!strcmp (Home, "/"))
 					Home = "";
 			
-   				PR_snprintf(Path, MAXPATHLEN, "%.900s/.netscape/java/download/", Home);
+   				PR_snprintf(Path, MAXPATHLEN, "%.900s/" NS_PROFILE_DIR "/java/download/", Home);
 			}
 			directory = XP_STRDUP( Path );
 		}

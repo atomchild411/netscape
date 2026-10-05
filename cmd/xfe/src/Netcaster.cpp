@@ -220,7 +220,7 @@ xfe_netcaster_path(void)
 	  XP_STRCPY(private_xfe_netcaster_path, home);
 	  if (xfe_last_character(private_xfe_netcaster_path) != '/')
 		XP_STRCAT(private_xfe_netcaster_path,"/");
-	  XP_STRCAT(private_xfe_netcaster_path,".netscape/");
+	  XP_STRCAT(private_xfe_netcaster_path,NS_PROFILE_DIR "/");
 	  XP_STRCAT(private_xfe_netcaster_path,netcasterTabHtmlPath);
 	  if (xfe_path_exists(private_xfe_netcaster_path))
 		{

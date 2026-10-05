@@ -41,7 +41,7 @@ config("toolbar.places.item_3.url","http://guide.netscape.com/guide/whats_new.ht
 config("toolbar.places.item_4.label","What's Cool");
 config("toolbar.places.item_4.url","http://guide.netscape.com/guide/whats_cool.html");
 
-config("internal_url.net_search.url","http://home.netscape.com/home/internet-search.html");
+config("internal_url.net_search.url","https://html.duckduckgo.com/html/");
 config("internal_url.more_info_plugin.url","http://cgi.netscape.com/eng/mozilla/2.0/extensions/info.cgi");
 config("internal_url.default_template.url","http://home.netscape.com/home/gold3.0_templates.html");
 config("internal_url.page_from_wizard.url", "http://home.netscape.com/home/gold4.0_wizard.html");

@@ -423,7 +423,7 @@ XFE_SpellHandler::getSpellCheckerDir()
 		// Form "$HOME/.netscape/spell/" into buf...
 		//
 		XP_STRNCPY_SAFE(buf, home, sizeof(buf)-1);
-		XP_STRNCAT_SAFE(buf, "/.netscape/spell/",
+		XP_STRNCAT_SAFE(buf, "/" NS_PROFILE_DIR "/spell/",
 						sizeof(buf)-1 - XP_STRLEN(buf));
 		buf[sizeof(buf)-1] = '\0';
 		
@@ -485,7 +485,7 @@ XFE_SpellHandler::getPersonalDicPath()
 	{
 		/* Form "$HOME/.netscape/custom.dic" into buf */
 		XP_STRNCPY_SAFE(buf, home, sizeof(buf)-1);
-		XP_STRNCAT_SAFE(buf, "/.netscape/custom.dic",
+		XP_STRNCAT_SAFE(buf, "/" NS_PROFILE_DIR "/custom.dic",
 						sizeof(buf)-1 - XP_STRLEN(buf));
 		buf[sizeof(buf)-1] = '\0';
 	}

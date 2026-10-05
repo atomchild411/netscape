@@ -84,7 +84,7 @@ void FE_InitAddrBook()
 
   	if (!home) home = "";
 
-	PR_snprintf(oldFile, sizeof (oldFile), "%.900s/.netscape/addrbook.db", home); 
+	PR_snprintf(oldFile, sizeof (oldFile), "%.900s/" NS_PROFILE_DIR "/addrbook.db", home); 
 	oldFp = XP_FileOpen(oldFile, xpAddrBook, "r");
 	if (oldFp) {
 		char    newFile[256];
@@ -118,7 +118,7 @@ void FE_InitAddrBook()
 
 	DIR_GetServerPreferences (&directories, tmp);
 	PR_snprintf(tmp, sizeof (tmp), 
-				"%.900s/.netscape/address-book.html", home); 
+				"%.900s/" NS_PROFILE_DIR "/address-book.html", home); 
 	{
 #ifndef MOZ_NEWADDR
 		DIR_Server *pabDir = NULL;

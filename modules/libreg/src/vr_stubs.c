@@ -265,7 +265,7 @@ int strncasecmp(const char *str1, const char *str2, int length)
 #include "NSReg.h"
 #include "VerReg.h"
 
-#define DEF_REG "/.netscape/registry"
+#define DEF_REG "/" NS_PROFILE_DIR "/registry"
 
 char *TheRegistry; 
 char *Flist;

@@ -115,7 +115,9 @@ RDF_Init(RDF_InitParams params)
   sRDFInitedB = PR_TRUE;
 
 #ifdef MOZILLA_CLIENT
-  PREF_SetDefaultCharPref("browser.NavCenter", "http://rdf.netscape.com/rdf/navcntr.rdf");
+  /* rdf.netscape.com is long gone: the sidebar starts empty (a missing
+	   local file would raise an error dialog on every start). */
+	PREF_SetDefaultCharPref("browser.NavCenter", "about:blank");
   PREF_CopyCharPref("browser.NavCenter", &navCenterURL);
    gNavCntrUrl = copyString(navCenterURL); 
   if (!strchr(navCenterURL, ':')) {

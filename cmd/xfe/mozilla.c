@@ -2386,7 +2386,7 @@ main
 #ifdef OLD_UNIX_FILES
         ".netscape-preferences"
 #else
-        ".netscape/preferences.js"
+        NS_PROFILE_DIR "/preferences.js"
 #endif
 		);
 
@@ -2679,7 +2679,7 @@ main
       else 
 	{
 	  char *fmt = NULL;
-	  char *lock = name ? name : ".netscape/lock";
+	  char *lock = name ? name : NS_PROFILE_DIR "/lock";
 
 	  fmt = PR_sprintf_append(fmt, XP_GetString(XFE_APP_HAS_DETECTED_LOCK),
 				  XP_AppName, lock);
@@ -2794,9 +2794,9 @@ main
 
 {
     char buf [1024];
-    PR_snprintf (buf, sizeof (buf), "%s/%s", fe_home_dir, ".netscape/user.js");
+    PR_snprintf (buf, sizeof (buf), "%s/%s", fe_home_dir, NS_PROFILE_DIR "/user.js");
     PREF_ReadUserJSFile(buf);
-    PR_snprintf (buf, sizeof (buf), "%s/%s", fe_home_dir, ".netscape/hook.js");
+    PR_snprintf (buf, sizeof (buf), "%s/%s", fe_home_dir, NS_PROFILE_DIR "/hook.js");
     HK_ReadHookFile(buf);
 }
 
@@ -3562,7 +3562,7 @@ fe_ensure_config_dir_exists (Widget toplevel)
   struct stat st;
   XP_Bool exists;
 
-  dir = PR_smprintf ("%s/.netscape", fe_home_dir);
+  dir = PR_smprintf ("%s/" NS_PROFILE_DIR, fe_home_dir);
   if (!dir)
     return FALSE;
 
@@ -3850,16 +3850,16 @@ fe_copy_init_files (Widget toplevel)
 
   FROB(".netscape-preferences",
        ".MCOM-preferences",
-       ".netscape/preferences",
+       NS_PROFILE_DIR "/preferences",
        0)
   FROB(".netscape-bookmarks.html",
        ".MCOM-bookmarks.html",
-       ".netscape/bookmarks.html",
+       NS_PROFILE_DIR "/bookmarks.html",
        0)
 
   FROB(".netscape-cookies",
        ".MCOM-HTTP-cookie-file",
-       ".netscape/cookies",
+       NS_PROFILE_DIR "/cookies",
        (S_IRUSR | S_IWUSR))		/* rw only by owner */
 
 #undef FROB
@@ -3896,7 +3896,7 @@ fe_clean_old_init_files (Widget toplevel)
   /* spider begin */
   /* TODO: where does this string get free'd? */
   if (fe_globalPrefs.sar_cache_dir) free (fe_globalPrefs.sar_cache_dir);
-  PR_snprintf (buf, sizeof (buf), "%s/.netscape/archive/", fe_home_dir);
+  PR_snprintf (buf, sizeof (buf), "%s/" NS_PROFILE_DIR "/archive/", fe_home_dir);
   fe_globalPrefs.sar_cache_dir = strdup (buf);
   /* spider end */
 
@@ -3906,11 +3906,11 @@ fe_clean_old_init_files (Widget toplevel)
   /* History and cache always go in the new place by default,
      no matter what they were set to before. */
   if (fe_globalPrefs.history_file) free (fe_globalPrefs.history_file);
-  PR_snprintf (buf, sizeof (buf), "%s/.netscape/history.db", fe_home_dir);
+  PR_snprintf (buf, sizeof (buf), "%s/" NS_PROFILE_DIR "/history.db", fe_home_dir);
   fe_globalPrefs.history_file = strdup (buf);
 
   if (fe_globalPrefs.cache_dir) free (fe_globalPrefs.cache_dir);
-  PR_snprintf (buf, sizeof (buf), "%s/.netscape/cache/", fe_home_dir);
+  PR_snprintf (buf, sizeof (buf), "%s/" NS_PROFILE_DIR "/cache/", fe_home_dir);
   fe_globalPrefs.cache_dir = strdup (buf);
 
   /* If they were already keeping their bookmarks file in a different
@@ -3920,7 +3920,7 @@ fe_clean_old_init_files (Widget toplevel)
       !XP_STRCMP (fe_globalPrefs.bookmark_file, buf))
     {
       if (fe_globalPrefs.bookmark_file) free (fe_globalPrefs.bookmark_file);
-      PR_snprintf (buf, sizeof (buf), "%s/.netscape/bookmarks.html",
+      PR_snprintf (buf, sizeof (buf), "%s/" NS_PROFILE_DIR "/bookmarks.html",
 		   fe_home_dir);
       fe_globalPrefs.bookmark_file = strdup (buf);
     }
@@ -3933,7 +3933,7 @@ fe_clean_old_init_files (Widget toplevel)
       !XP_STRCMP (fe_globalPrefs.home_document, buf))
     {
       if (fe_globalPrefs.home_document) free (fe_globalPrefs.home_document);
-      PR_snprintf (buf, sizeof (buf), "file:%s/.netscape/bookmarks.html",
+      PR_snprintf (buf, sizeof (buf), "file:%s/" NS_PROFILE_DIR "/bookmarks.html",
 		   fe_home_dir);
       fe_globalPrefs.home_document = strdup (buf);
     }

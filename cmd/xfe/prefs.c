@@ -582,7 +582,7 @@ read_old_prefs_file(XFE_GlobalPrefs* prefs)
     struct stat st;
     char buf[1024];
     char* home_dir;
-    char* filenames[] = {"%s/.netscape/preferences",
+    char* filenames[] = {"%s/" NS_PROFILE_DIR "/preferences",
                          "%s/.netscape-preferences",
                          "%s/.MCOM-preferences",};
 

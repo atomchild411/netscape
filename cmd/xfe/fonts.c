@@ -1879,7 +1879,7 @@ void fe_ShutdownWebfonts(void)
 	{
 		/* Form "$HOME/.netscape/dynfonts/fonts.cat" into buf */
 		strncpy(buf, home, sizeof(buf)-1);
-		strncat(buf, "/.netscape/dynfonts/fonts.cat",
+		strncat(buf, "/" NS_PROFILE_DIR "/dynfonts/fonts.cat",
 				sizeof(buf)-1 - strlen(buf));
 		buf[sizeof(buf)-1] = '\0';
 		nffbu_SaveCatalog(fe_FontUtility, buf, NULL);
@@ -3791,7 +3791,7 @@ fe_loadUnicodePseudoFonts(Display *dpy, char *my_origFamily, int my_pitch)
 
 #ifndef NO_WEB_FONTS
 
-#define WF_FONT_DISPLAYER_PATH_1 "~/.netscape/dynfonts"
+#define WF_FONT_DISPLAYER_PATH_1 "~/" NS_PROFILE_DIR "/dynfonts"
 #define WF_FONT_DISPLAYER_PATH_4 "/usr/local/lib/netscape/dynfonts"
 
 /* This static is outside of fe_InitializeWebfonts() 'cause HPUX has a
@@ -3819,7 +3819,7 @@ fe_InitializeWebfonts(void)
 	{
 		/* Form "$HOME/.netscape/dynfonts/fonts.cat" into buf */
 		strncpy(buf, home, sizeof(buf)-1);
-		strncat(buf, "/.netscape/dynfonts/fonts.cat",
+		strncat(buf, "/" NS_PROFILE_DIR "/dynfonts/fonts.cat",
 				sizeof(buf)-1 - strlen(buf));
 		buf[sizeof(buf)-1] = '\0';
 		nffbu_LoadCatalog(fe_FontUtility, buf, NULL);

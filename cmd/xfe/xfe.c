@@ -3388,7 +3388,7 @@ char* fe_GetLDAPTmpFile(char *name) {
 	if (!home) home = "";
 	if (!name) return NULL;
 
-	PR_snprintf(tmp, sizeof(tmp), "%.900s/.netscape/", home);
+	PR_snprintf(tmp, sizeof(tmp), "%.900s/" NS_PROFILE_DIR "/", home);
 
 #ifdef _XP_TMP_FILENAME_FOR_LDAP_
 	/* we need to write this */

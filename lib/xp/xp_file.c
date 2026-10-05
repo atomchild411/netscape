@@ -503,7 +503,7 @@ static const char *
 xp_unix_config_directory(char* buf)
 {
   static XP_Bool initted = FALSE;
-  const char *dir = ".netscape";
+  const char *dir = NS_PROFILE_DIR;
   char *home;
   if (initted)
 	return buf;

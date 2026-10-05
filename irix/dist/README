@@ -13,8 +13,7 @@ Needs:   IRIX 6.5.22 or later, X11 and IRIX's Motif (x_eoe, motif_eoe);
 Trusts:  the Mozilla root certificates in /usr/local/lib/netscape5/cacert.pem
          (also OpenSSL's default store, SSL_CERT_FILE and SSL_CERT_DIR).
 X class: Netscape5 (so it keeps clear of Netscape 4's app-defaults/Netscape).
-Profile: ~/.netscape, as Netscape 4 uses: give it its own HOME to keep a
-         Netscape 4 profile apart.
+Profile: ~/.netscape5 (Netscape 4 keeps ~/.netscape; the two do not mix).
 
 Debugging: NETSCAPE_NET_DEBUG=1 logs TLS handshakes and network errors.
 

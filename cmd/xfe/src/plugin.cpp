@@ -753,7 +753,7 @@ void FE_RegisterPlugins()
 	} else {
 		/* Stuff in $MOZILLA_HOME if it's defined. */
 		if(mozHome) {
-			pluginPath = PR_smprintf("%s:%s/plugins:%.900s/.netscape/plugins",
+			pluginPath = PR_smprintf("%s:%s/plugins:%.900s/" NS_PROFILE_DIR "/plugins",
 									 DEFAULT_LEGACY_PLUGIN_PATH,
 									 mozHome,
 									 home);
@@ -766,16 +766,16 @@ void FE_RegisterPlugins()
 			strncat(buf, "plugins", sizeof(buf)-1 - strlen(buf));
 			buf[sizeof(buf)-1] = '\0';
 
-			pluginPath = PR_smprintf("%s:%s:%.900s/.netscape/plugins",
+			pluginPath = PR_smprintf("%s:%s:%.900s/" NS_PROFILE_DIR "/plugins",
 									 DEFAULT_LEGACY_PLUGIN_PATH,
 									 buf,
 									 home);			
 		}
     }
 
-    PR_snprintf(filename, sizeof(filename), "%.900s/.netscape/plugin-list", home);
-    PR_snprintf(newFilename, sizeof(newFilename), "%.900s/.netscape/plugin-list.new", home);
-    PR_snprintf(oldFilename, sizeof(oldFilename), "%.900s/.netscape/plugin-list.BAK", home);
+    PR_snprintf(filename, sizeof(filename), "%.900s/" NS_PROFILE_DIR "/plugin-list", home);
+    PR_snprintf(newFilename, sizeof(newFilename), "%.900s/" NS_PROFILE_DIR "/plugin-list.new", home);
+    PR_snprintf(oldFilename, sizeof(oldFilename), "%.900s/" NS_PROFILE_DIR "/plugin-list.BAK", home);
 
     if (pluginList == NULL) {
         pluginList = getPluginList(32);

@@ -25,7 +25,8 @@ config("timebomb.relative_timebomb_secret_name","general.bproxy_cert_digest");
 config("timebomb.relative_timebomb_days",-1);
 config("timebomb.relative_timebomb_warning_days",-1);
 
-pref("network.search.url","http://cgi.netscape.com/cgi-bin/url_search.cgi?search=");
+// cgi.netscape.com is long gone; DuckDuckGo's HTML search needs no JavaScript.
+pref("network.search.url","https://html.duckduckgo.com/html/?q=");
 pref("general.bproxy_cert_digest",0);
 
 pref("general.startup.browser",             true);
@@ -49,7 +50,8 @@ pref("general.fullcircle_collect_ns_data",  false);
 
 pref("browser.enable_style_sheets",         true);
 pref("browser.startup.page",                1);     // 0 = blank, 1 = home, 2 = last
-pref("browser.startup.homepage",            "http://home.netscape.com/");
+// home.netscape.com is long gone: start on the local about: page.
+pref("browser.startup.homepage",            "about:");
 pref("browser.startup.homepage_override",   true);
 pref("browser.startup.autoload_homepage",   true);
 pref("browser.startup.agreed_to_licence",   false);

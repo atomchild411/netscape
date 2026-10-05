@@ -357,9 +357,9 @@ test_kdb_name_cb (void *arg, int vers)
 {
   static char f[1024];
   if (vers <= 2)
-	sprintf(f, "%s/.netscape/key.db", getenv("HOME"));
+	sprintf(f, "%s/" NS_PROFILE_DIR "/key.db", getenv("HOME"));
   else
-	sprintf(f, "%s/.netscape/key%d.db", getenv("HOME"), vers);
+	sprintf(f, "%s/" NS_PROFILE_DIR "/key%d.db", getenv("HOME"), vers);
   return f;
 }
 

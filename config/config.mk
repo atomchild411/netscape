@@ -455,6 +455,11 @@ ifdef NO_SECURITY
 DEFINES		+= -DNO_SECURITY
 endif
 
+# The profile directory in $HOME: a build that must not share Netscape 4's
+# ~/.netscape (IRIX ships 4.8) names its own.
+NS_PROFILE_DIR	?= .netscape
+DEFINES		+= -DNS_PROFILE_DIR=\"$(NS_PROFILE_DIR)\"
+
 # The X class of the program (cmd/xfe/name.h), when not Netscape.
 ifdef NS_PROGCLASS
 DEFINES		+= -DXFE_PROGCLASS=$(NS_PROGCLASS)

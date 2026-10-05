@@ -1466,9 +1466,6 @@ NET_SanityCheckDNS (MWContext *context)
 
   char *proxy = MKhttp_proxy;
   char *socks = NET_SocksHostName;
-  char *test_host_1 = "home.netscape.com";
-  char *test_host_2 = "home6.netscape.com";
-  char *test_host_3 = "internic.net";
   char *message;
 #if defined(__sun) && !defined(__svr4__)
   char temp[1000];
@@ -1576,12 +1573,9 @@ NET_SanityCheckDNS (MWContext *context)
 	    losers [loser_count++] = local2;
 #endif /* XP_UNIX */
 
-	  if (!net_IsHostResolvable (test_host_1, context))
-	    losers [loser_count++] = test_host_1;
-	  if (!net_IsHostResolvable (test_host_2, context))
-	    losers [loser_count++] = test_host_2;
-	  if (!net_IsHostResolvable (test_host_3, context))
-	    losers [loser_count++] = test_host_3;
+	  /* The fixed test hosts this checked (home.netscape.com,
+	     home6.netscape.com, internic.net) are gone or meaningless today:
+	     only the proxy, the SOCKS host and this machine are checked. */
 
 	  if (loser_count > 0)
 	    {
