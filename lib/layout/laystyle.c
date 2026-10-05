@@ -378,6 +378,124 @@ LO_CreateStyleSheetDummyTag(PA_Tag *old_tag)
 	return(new_tag);
 }
 
+#ifdef NS_LIBCSS
+/*
+ * Elements the 1998 parser does not know (P_UNKNOWN: nav, section, header,
+ * article, ...) keep their name as the first word of the tag's attribute
+ * text.  With libcss they go on the style stack under that name, so
+ * selectors see them and their own rules apply.
+ *
+ * Returns the name in lower case (the caller frees it), or NULL when TAG
+ * is no such element.
+ */
+PRIVATE char *
+lo_UnknownTagName(PA_Tag *tag)
+{
+	char *p, *name = NULL;
+	int32 i = 0, start;
+
+	if(tag->type != P_UNKNOWN || !tag->data)
+		return NULL;
+	PA_LOCK(p, char *, tag->data);
+	while(i < tag->data_len && XP_IS_SPACE(p[i]))
+		i++;
+	if(i < tag->data_len && p[i] == '/')
+		i++;
+	start = i;
+	if(i < tag->data_len && XP_IS_ALPHA(p[i]))
+	{
+		while(i < tag->data_len &&
+			  (XP_IS_ALPHA(p[i]) || XP_IS_DIGIT(p[i]) ||
+			   p[i] == '-' || p[i] == '_' || p[i] == ':'))
+			i++;
+		/* a bare word: "name=" would be an attribute (a relayout dummy) */
+		if(i == tag->data_len || XP_IS_SPACE(p[i]) || p[i] == '/' || p[i] == '>')
+		{
+			name = (char *)XP_ALLOC(i - start + 1);
+			if(name)
+			{
+				int32 k;
+				for(k = 0; k < i - start; k++)
+					name[k] = XP_TO_LOWER(p[start + k]);
+				name[k] = '\0';
+			}
+		}
+	}
+	PA_UNLOCK(tag->data);
+	return name;
+}
+
+/* Is TAG an element unknown to the parser that libcss puts on the style
+ * stack?  *IS_VOID tells whether it has no content (HTML's void elements
+ * the parser does not know, or written <x/>): it is popped at once. */
+PUBLIC XP_Bool
+LO_IsStyledUnknownTag(lo_DocState *state, PA_Tag *tag, XP_Bool *is_void)
+{
+	static const char *const voids[] = { "source", "track", "wbr", "keygen", NULL };
+	char *name, *p;
+	int k;
+
+	*is_void = FALSE;
+	if(tag->type != P_UNKNOWN || !state->top_state ||
+	   !state->top_state->style_stack ||
+	   !SML_UsesLibCSS(state->top_state->style_stack))
+		return FALSE;
+	name = lo_UnknownTagName(tag);
+	if(!name)
+		return FALSE;
+	for(k = 0; voids[k]; k++)
+		if(!XP_STRCMP(name, voids[k]))
+			*is_void = TRUE;
+	PA_LOCK(p, char *, tag->data);
+	if(tag->data_len > 0 && p[tag->data_len - 1] == '/')
+		*is_void = TRUE;
+	PA_UNLOCK(tag->data);
+	XP_FREE(name);
+	return TRUE;
+}
+
+/* Close the nearest open element named like TAG and everything opened
+ * inside it, as HTML does; not across a table boundary, and nothing for an
+ * end tag that closes nothing. */
+PRIVATE void
+lo_PopStyleTagByName(MWContext *context, lo_DocState **state, PA_Tag *tag)
+{
+	StyleAndTagStack *stack = (*state)->top_state->style_stack;
+	char *name;
+	TagStruct *t;
+	int32 i;
+
+	if(tag->type == P_UNKNOWN)
+		name = lo_UnknownTagName(tag);
+	else
+		name = XP_STRDUP(pa_PrintTagToken((int32)tag->type));
+	if(!name)
+		return;
+	for(i = 0; (t = STYLESTACK_GetTagByIndex(stack, i)) != NULL; i++)
+	{
+		if(t->name && !strcasecomp(t->name, name))
+			break;
+		if(t->name && (!strcasecomp(t->name, "table") ||
+					   !strcasecomp(t->name, "td") ||
+					   !strcasecomp(t->name, "th")))
+		{
+			t = NULL;
+			break;
+		}
+	}
+	XP_FREE(name);
+	if(!t)
+		return;
+	for(; i >= 0; i--)
+	{
+		TagStruct *top = STYLESTACK_GetTagByIndex(stack, 0);
+		TagType type = (top && top->name) ? pa_tokenize_tag(top->name) : P_UNKNOWN;
+
+		LO_PopStyleTagByIndex(context, state, type, 0);
+	}
+}
+#endif /* NS_LIBCSS */
+
 PUBLIC PushTagStatus
 LO_PushTagOnStyleStack(MWContext *context, lo_DocState *state, PA_Tag *tag)
 {
@@ -397,6 +515,9 @@ LO_PushTagOnStyleStack(MWContext *context, lo_DocState *state, PA_Tag *tag)
 
 	char *temp_tag_name;
 	char *tableParamValues[4];
+#ifdef NS_LIBCSS
+	XP_Bool unknown_void;
+#endif
 	const int sizeOfParamsTable = 4;
 	int k;
 
@@ -442,7 +563,11 @@ LO_PushTagOnStyleStack(MWContext *context, lo_DocState *state, PA_Tag *tag)
 		 * but we need to pay some special attention
 		 * to these tags in the relayout state
 		 */
-		if(tag->type == P_UNKNOWN )
+		if(tag->type == P_UNKNOWN 
+#ifdef NS_LIBCSS
+		   && !LO_IsStyledUnknownTag(state, tag, &unknown_void)
+#endif
+		   )
 		{
 			rv = PUSH_TAG_ERROR;
 			return(rv);
@@ -466,6 +591,11 @@ LO_PushTagOnStyleStack(MWContext *context, lo_DocState *state, PA_Tag *tag)
 	 * but we need to pay some special attention
 	 * to these tags in the relayout state
 	 */
+#ifdef NS_LIBCSS
+	if(tag->type == P_UNKNOWN && !tag_name_attr &&
+	   LO_IsStyledUnknownTag(state, tag, &unknown_void))
+		tag_name = tag_name_attr = lo_UnknownTagName(tag);
+#endif
 	if(tag->type == P_UNKNOWN && !tag_name_attr)
 	{
 		rv = PUSH_TAG_ERROR;
@@ -475,6 +605,29 @@ LO_PushTagOnStyleStack(MWContext *context, lo_DocState *state, PA_Tag *tag)
 		XP_FREEIF(id_name);
 		return(rv);
 	}
+
+#ifdef NS_LIBCSS
+	if(SML_UsesLibCSS(state->top_state->style_stack))
+	{
+		/* libcss takes the tag as it is: its own class and id, its
+		 * attributes, and the style attribute parsed in place (no
+		 * JavaScript, so no blocking). */
+		char *attrs;
+
+		if(!tag_name)
+			tag_name = XP_STRDUP(pa_PrintTagToken((int32)tag->type));
+		SML_SetViewport(state->top_state->style_stack,
+						state->win_width, state->win_height);
+		PA_LOCK(attrs, char *, tag->data);
+		rv = SML_PushTagWithAttrs(state->top_state->style_stack, tag_name,
+								  class_name, id_name, attrs,
+								  attrs ? tag->data_len : 0, style_value,
+								  state->top_state->base_url);
+		PA_UNLOCK(tag->data);
+		XP_FREEIF(style_value);
+		return(rv);
+	}
+#endif
 
 	/*
 	 *style_value freed in lo_ProcessStyleAttribute
@@ -784,7 +937,17 @@ LO_PopStyleTag(MWContext *context, lo_DocState **state, PA_Tag *tag)
 {
 	/* look for tags that need to be implicitly pop'd */
 	if(!LO_ImplicitPop(context, state, tag))
+	{
+#ifdef NS_LIBCSS
+		if((*state)->top_state->style_stack &&
+		   SML_UsesLibCSS((*state)->top_state->style_stack))
+		{
+			lo_PopStyleTagByName(context, state, tag);
+			return;
+		}
+#endif
 		LO_PopStyleTagByIndex(context, state, tag->type, 0);
+	}
 
 }
 

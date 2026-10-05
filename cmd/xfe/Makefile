@@ -682,11 +682,17 @@ OTHER_LIBS	= -lSgm -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm -lpthread $(OS
 ifdef NS_OPENSSL
 OTHER_LIBS	:= -Wl,-Bstatic -lssl -lcrypto -Wl,-Bdynamic $(OTHER_LIBS)
 endif
+ifdef NS_LIBCSS
+OTHER_LIBS	:= -Wl,-Bstatic -lcss -lparserutils -lwapcaplet -Wl,-Bdynamic $(OTHER_LIBS)
+endif
 else
 # pkgsrc's Motif and X libraries: SGI's libSgm extends IRIX's own Motif only.
 OTHER_LIBS	= -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm -lpthread $(OS_LIBS)
 ifdef NS_OPENSSL
 OTHER_LIBS	:= -lssl -lcrypto $(OTHER_LIBS)
+endif
+ifdef NS_LIBCSS
+OTHER_LIBS	:= -lcss -lparserutils -lwapcaplet $(OTHER_LIBS)
 endif
 endif
 else

@@ -27,6 +27,9 @@
 #include "stystruc.h"
 #include "stystack.h"
 #include "jsspriv.h"
+#ifdef NS_LIBCSS
+#include "nscss.h"
+#endif
 
 /* simple stack implementation for style/tag stack 
  * why don't we have an XP Stack?
@@ -55,6 +58,10 @@ typedef struct _SML_StyleAndTagStack {
 	StyleObject		  *tags;
 	StyleObject		  *classes;
 	StyleObject		  *ids;
+
+#ifdef NS_LIBCSS
+	NSCSS_Doc		  *css;
+#endif
 
 } SML_StyleAndTagStack;
 
@@ -113,6 +120,10 @@ SML_FreeTagStruct(SML_StyleAndTagStack *self, TagStruct *tag)
 	if(!tag)
 		return;
 
+#ifdef NS_LIBCSS
+	if(tag->css_node)
+		NSCSS_CloseNode(self->css, (NSCSS_Node *)tag->css_node);
+#endif
 	XP_FREEIF(tag->name);
 	XP_FREEIF(tag->class_name);
 	XP_FREEIF(tag->id);
@@ -239,9 +250,12 @@ ss_add_to_stack(SML_StyleAndTagStack *self, TagAndStyleAssoc *pair)
 }
 
 
-PushTagStatus 
-SML_PushTag(SML_StyleAndTagStack *self, char *name, char *class_name, char *id)
+PushTagStatus
+SML_PushTagWithAttrs(StyleAndTagStack *styleStack, char *name, char *class_name,
+					 char *id, const char *attrs, int32 attrs_len,
+					 const char *style, const char *base_url)
 {
+	SML_StyleAndTagStack *self = (SML_StyleAndTagStack *)styleStack;
 	TagStruct *new_tag;
 	StyleStruct *ss;
 	TagAndStyleAssoc *assoc;
@@ -261,6 +275,20 @@ SML_PushTag(SML_StyleAndTagStack *self, char *name, char *class_name, char *id)
 		return PUSH_TAG_ERROR;
 	}
 
+#ifdef NS_LIBCSS
+	if(self->css)
+	{
+		NSCSS_Node *parent = NULL;
+
+		if(self->tag_stack_first_unused_index > 0)
+			parent = (NSCSS_Node *)self->tag_stack[
+				self->tag_stack_first_unused_index - 1]->tag->css_node;
+		new_tag->css_node = NSCSS_OpenNode(self->css, parent, name,
+										   class_name, id, attrs, attrs_len,
+										   style, base_url);
+	}
+#endif
+
 	assoc = sml_new_assoc(self, new_tag, ss);
 	
 	if(!assoc)
@@ -272,10 +300,54 @@ SML_PushTag(SML_StyleAndTagStack *self, char *name, char *class_name, char *id)
 	
 	ss_add_to_stack(self, assoc);	
 
+#ifdef NS_LIBCSS
+	if(self->css)
+	{
+		NSCSS_StyleNode(self->css, (NSCSS_Node *)new_tag->css_node, ss);
+		return(PUSH_TAG_SUCCESS);
+	}
+#endif
+
 	/* add call to style sheet parser here to fill in style struct */
 	jss_GetStyleForTopTag((StyleAndTagStack*)self);
 
 	return(PUSH_TAG_SUCCESS);
+}
+
+PushTagStatus 
+SML_PushTag(SML_StyleAndTagStack *self, char *name, char *class_name, char *id)
+{
+	return SML_PushTagWithAttrs((StyleAndTagStack *)self, name, class_name,
+								id, NULL, 0, NULL, NULL);
+}
+
+XP_Bool
+SML_UsesLibCSS(StyleAndTagStack *styleStack)
+{
+#ifdef NS_LIBCSS
+	return ((SML_StyleAndTagStack *)styleStack)->css != NULL;
+#else
+	return FALSE;
+#endif
+}
+
+void
+SML_AddStyleSheet(StyleAndTagStack *styleStack, const char *url,
+				  const char *charset, const char *media,
+				  const char *data, int32 len)
+{
+#ifdef NS_LIBCSS
+	NSCSS_AddSheet(((SML_StyleAndTagStack *)styleStack)->css, url, charset,
+				   media, data, len);
+#endif
+}
+
+void
+SML_SetViewport(StyleAndTagStack *styleStack, int32 width, int32 height)
+{
+#ifdef NS_LIBCSS
+	NSCSS_SetViewport(((SML_StyleAndTagStack *)styleStack)->css, width, height);
+#endif
 }
 
 /* pop a tag from within the stack
@@ -399,6 +471,9 @@ SML_Delete(SML_StyleAndTagStack *self)
 
 	sml_free_stack(self);
 
+#ifdef NS_LIBCSS
+	NSCSS_DestroyDoc(self->css);
+#endif
 	XP_FREE(self);
 }
 
@@ -458,6 +533,12 @@ SML_StyleStack_Factory_Create(void)
 
     self->vtable = (void*)&StyleAndTagStack_interface;
     self->refcount = 1;
+#ifdef NS_LIBCSS
+    /* Selectors need every open tag, from the start of the document. */
+    self->css = NSCSS_NewDoc();
+    if(self->css)
+        self->save_stack = TRUE;
+#endif
 
     return (StyleAndTagStack*)self;
 }

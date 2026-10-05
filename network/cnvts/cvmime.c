@@ -701,6 +701,16 @@ NET_StreamClass * XML_HTMLConverter(FO_Present_Types  format_out, void *data_obj
   NET_RegisterContentTypeConverter ("*", FO_CACHE_AND_XMLCSS, NULL, NET_CacheConverter);
     }
 
+#ifdef NS_LIBCSS
+    /* linked style sheets for libcss (lib/layout/layscrip.c) */
+    {
+NET_StreamClass * LO_CSSConverter(FO_Present_Types format_out, void *data_object, URL_Struct *URL_s, MWContext *window_id);
+
+  NET_RegisterContentTypeConverter ("*", FO_NSCSS, NULL, LO_CSSConverter);
+  NET_RegisterContentTypeConverter ("*", FO_CACHE_AND_NSCSS, NULL, NET_CacheConverter);
+    }
+#endif
+
 }
 
 

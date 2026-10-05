@@ -815,6 +815,7 @@ struct lo_TopState_struct {
     uint script_lineno;	/* parser newline count at last <SCRIPT> tag */
     int8 in_script;		/* script type if in script, see below */
     PRPackedBool in_blocked_script; /* inside blocked <SCRIPT> tag container */
+    char *css_media;                   /* media of the open STYLE (NS_LIBCSS) */
     int8 default_style_script_type;    /* the default script type or the last 
 					* type of script encountered 
 				 	*/

@@ -17,6 +17,7 @@
  */
 
 #include "xp.h"
+#include <ctype.h>
 #include "pa_tags.h"
 #include "layout.h"
 #include "laylayer.h"
@@ -2433,6 +2434,37 @@ lo_transform_text(char *ptr, int method)
  *
  * This function just maps the string method to an int
  */
+#ifdef NS_LIBCSS
+/* text-transform for multibyte text (UTF-8 and the like): ASCII letters
+ * only, so the bytes of other characters are left alone. */
+PRIVATE void
+lo_transform_ascii_text(char *ptr, char *method)
+{
+	XP_Bool first = TRUE;
+	int how = !strcasecomp(method, "uppercase") ? UPPERCASE :
+		!strcasecomp(method, "lowercase") ? LOWERCASE :
+		!strcasecomp(method, "capitalize") ? CAPITALIZE : -1;
+
+	if (how < 0)
+		return;
+	for (; *ptr; ptr++)
+	{
+		unsigned char c = (unsigned char) *ptr;
+
+		if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+		{
+			first = TRUE;
+			continue;
+		}
+		if (c < 0x80 && ((how == UPPERCASE) || (how == CAPITALIZE && first)))
+			*ptr = (char) toupper(c);
+		else if (c < 0x80 && how == LOWERCASE)
+			*ptr = (char) tolower(c);
+		first = FALSE;
+	}
+}
+#endif
+
 PRIVATE void
 lo_transform_text_from_string_method(char *ptr, char *method)
 {
@@ -2458,6 +2490,28 @@ void
 lo_FormatText(MWContext *context, lo_DocState *state, char *text)
 {
 	LO_TextBlock *	block;
+	
+#ifdef NS_LIBCSS
+	/* text-transform for multibyte text (UTF-8, ...), here while the
+	 * element the text is in is still on top of the style stack: such
+	 * text is laid out later, by the line. */
+	if( state->top_state && state->top_state->style_stack &&
+		INTL_CharSetType(state->font_stack->text_attr->charset) != SINGLEBYTE )
+		{
+		StyleStruct *style_struct = STYLESTACK_GetStyleByIndex(
+			state->top_state->style_stack, 0);
+
+		if( style_struct )
+			{
+			char *property = STYLESTRUCT_GetString(style_struct, TEXT_TRANSFORM_STYLE);
+			if(property)
+				{
+				lo_transform_ascii_text(text, property);
+				XP_FREE(property);
+				}
+			}
+		}
+#endif
 	
 	/* can we use the new style layout? */
 	if ( lo_CanUseBreakTable ( state ) )

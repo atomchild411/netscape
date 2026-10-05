@@ -466,6 +466,10 @@ DEFINES		+= -DXFE_PROGCLASS=$(NS_PROGCLASS)
 endif
 
 # TLS for netlib from OpenSSL (network/main/mktls.c).
+ifdef NS_LIBCSS
+DEFINES		+= -DNS_LIBCSS
+endif
+
 ifdef NS_OPENSSL
 DEFINES		+= -DNS_OPENSSL
 ifdef NS_CA_FILE

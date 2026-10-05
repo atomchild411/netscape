@@ -35,6 +35,11 @@
 #include "mcom_db.h"
 #include "laylayer.h"
 #include "prefapi.h"
+#ifdef NS_LIBCSS
+#include "intl_csi.h"
+#include "libi18n.h"
+#include "shr_str.h"
+#endif
 
 static char lo_jsAllowFileSrcFromNonFile[]
     = "javascript.allow.file_src_from_non_file";
@@ -86,6 +91,32 @@ lo_ParseScriptLanguage(MWContext * context, PA_Tag * tag, int8 * type,
     }
 }
 
+#ifdef NS_LIBCSS
+/*
+ * Does this STYLE or LINK go to libcss (CSS, not JavaScript Style Sheets)?
+ * Then it is not a script: no JavaScript runs, nothing can document.write.
+ */
+static XP_Bool
+lo_StyleGoesToLibCSS(MWContext *context, lo_TopState *top_state, PA_Tag *tag)
+{
+    PA_Block buff;
+    XP_Bool css = TRUE;
+
+    if ((tag->type != P_STYLE && tag->type != P_LINK) ||
+        !top_state->style_stack || !SML_UsesLibCSS(top_state->style_stack))
+        return FALSE;
+    buff = lo_FetchParamValue(context, tag, PARAM_TYPE);
+    if (buff != NULL) {
+        css = !XP_STRCASECMP((char *) buff, TEXT_CSS);
+        PA_FREE(buff);
+    }
+    return css;
+}
+
+static void
+lo_css_link_exit_fn(URL_Struct *url_struct, int status, MWContext *context);
+#endif
+
 void
 lo_BlockScriptTag(MWContext *context, lo_DocState *state, PA_Tag *tag)
 {
@@ -130,8 +161,12 @@ lo_BlockScriptTag(MWContext *context, lo_DocState *state, PA_Tag *tag)
             /* Keep track of whether we're in a script or style container... */
 			script_type = SCRIPT_TYPE_UNKNOWN;
 			lo_ParseScriptLanguage(context, tag, &script_type, &ver);
-			if (tag->type == P_STYLE || tag->type == P_LINK || 
-				script_type != SCRIPT_TYPE_UNKNOWN)
+			if ((tag->type == P_STYLE || tag->type == P_LINK || 
+				 script_type != SCRIPT_TYPE_UNKNOWN)
+#ifdef NS_LIBCSS
+				&& !lo_StyleGoesToLibCSS(context, top_state, tag)
+#endif
+				)
 				top_state->in_blocked_script = TRUE;
         }
         else if (top_state->in_blocked_script) {
@@ -1032,6 +1067,16 @@ lo_ProcessScriptTag(MWContext *context, lo_DocState *state, PA_Tag *tag, JSObjec
 	 * is a media not equal to screen
 	 */
 	buff = lo_FetchParamValue(context, tag, PARAM_MEDIA);
+#ifdef NS_LIBCSS
+	if (buff && top_state->in_script == SCRIPT_TYPE_CSS &&
+	    lo_StyleGoesToLibCSS(context, top_state, tag)) {
+	    /* libcss evaluates media queries itself */
+	    XP_FREEIF(top_state->css_media);
+	    top_state->css_media = XP_STRDUP((char *) buff);
+	    PA_FREE(buff);
+	    buff = NULL;
+	}
+#endif
 	if (buff) {
 	    if (strcasecomp((char*)buff, "screen")) {
 		/* set the script type to UNKNOWN
@@ -1255,6 +1300,59 @@ lo_ProcessScriptTag(MWContext *context, lo_DocState *state, PA_Tag *tag, JSObjec
 	if (script_type == SCRIPT_TYPE_NOT)
 	    goto end_tag_out;
 
+#ifdef NS_LIBCSS
+        if (script_type == SCRIPT_TYPE_CSS &&
+            lo_StyleGoesToLibCSS(context, top_state, tag)) {
+            char *media = top_state->css_media;
+            ScriptData *data = top_state->scriptData;
+
+            top_state->css_media = NULL;
+            state->text_divert = P_UNKNOWN;
+            if (tag->type == P_STYLE) {
+                INTL_CharSetInfo c = LO_GetDocumentCharacterSetInfo(context);
+                char *charset = (char *) INTL_CsidToCharsetNamePt(
+                    INTL_GetCSIWinCSID(c));
+
+                SML_AddStyleSheet(top_state->style_stack, top_state->base_url,
+                                  charset, media, (char *) state->line_buf,
+                                  state->line_buf_len);
+            }
+            else if (data && data->url && doc_data != NULL &&
+                     state->in_relayout == FALSE &&
+                     lo_create_script_blockage(context, state, LO_UNKNOWN)) {
+                /* Fetch the sheet; layout waits for it, the parser too
+                 * (lo_unblock_script_tag undoes this). */
+                URL_Struct *url_struct;
+
+                if (tag->is_end == (PRPackedBool)1) {
+                    PA_PushOverflow(doc_data);
+                    doc_data->overflow_depth ++;
+                }
+                top_state->scriptData = NULL;
+                XP_FREEIF(data->buffer);
+                data->buffer = media;       /* the sheet's media */
+                media = NULL;
+                url_struct = NET_CreateURLStruct(data->url,
+                                                 top_state->force_reload);
+                if (url_struct == NULL) {
+                    lo_DestroyScriptData(data);
+                    lo_unblock_script_tag(context, TRUE);
+                }
+                else {
+                    url_struct->must_cache = TRUE;
+                    url_struct->preset_content_type = TRUE;
+                    StrAllocCopy(url_struct->content_type, TEXT_CSS);
+                    url_struct->fe_data = data;
+                    NET_GetURL(url_struct, FO_CACHE_AND_NSCSS, context,
+                               lo_css_link_exit_fn);
+                }
+            }
+            XP_FREEIF(media);
+            state->line_buf_len = 0;
+            goto end_tag_out;
+        }
+#endif
+
 	/* convert from CSS to JavaScript here */
         if (tag->type != P_LINK && script_type == SCRIPT_TYPE_CSS) {
             char *new_buffer;
@@ -1428,6 +1526,91 @@ lo_ProcessScriptTag(MWContext *context, lo_DocState *state, PA_Tag *tag, JSObjec
         XP_FREEIF(untransformed);
     }
 }
+
+#ifdef NS_LIBCSS
+/*
+ * A linked style sheet for libcss: netlib streams it into a buffer
+ * (FO_NSCSS), libcss parses it when it is complete, and layout, blocked on
+ * the LINK since lo_ProcessScriptTag, carries on.
+ */
+typedef struct {
+    MWContext *context;
+    ScriptData *data;
+    char *buf;
+    int32 len, size;
+} lo_CSSStream;
+
+static int
+lo_css_write(NET_StreamClass *stream, const char *str, int32 len)
+{
+    lo_CSSStream *s = (lo_CSSStream *) stream->data_object;
+
+    if (s->len + len > s->size) {
+        int32 size = (s->len + len) * 2 + 1024;
+        char *b = (char *) XP_REALLOC(s->buf, size);
+        if (!b)
+            return MK_OUT_OF_MEMORY;
+        s->buf = b;
+        s->size = size;
+    }
+    XP_MEMCPY(s->buf + s->len, str, len);
+    s->len += len;
+    return len;
+}
+
+static unsigned int
+lo_css_write_ready(NET_StreamClass *stream)
+{
+    return MAX_WRITE_READY;
+}
+
+static void
+lo_css_complete(NET_StreamClass *stream)
+{
+    lo_CSSStream *s = (lo_CSSStream *) stream->data_object;
+    lo_TopState *top_state = lo_FetchTopState(XP_DOCID(s->context));
+
+    if (top_state && top_state->style_stack && s->buf)
+        SML_AddStyleSheet(top_state->style_stack, s->data->url, NULL,
+                          s->data->buffer, s->buf, s->len);
+    XP_FREEIF(s->buf);
+    XP_FREE(s);
+}
+
+static void
+lo_css_abort(NET_StreamClass *stream, int status)
+{
+    lo_CSSStream *s = (lo_CSSStream *) stream->data_object;
+
+    XP_FREEIF(s->buf);
+    XP_FREE(s);
+}
+
+NET_StreamClass *
+LO_CSSConverter(FO_Present_Types format_out, void *data_object,
+                URL_Struct *url_struct, MWContext *context)
+{
+    lo_CSSStream *s = XP_NEW_ZAP(lo_CSSStream);
+
+    if (!s)
+        return NULL;
+    s->context = context;
+    s->data = (ScriptData *) url_struct->fe_data;
+    return NET_NewStream("CSS", (MKStreamWriteFunc) lo_css_write,
+                         (MKStreamCompleteFunc) lo_css_complete,
+                         (MKStreamAbortFunc) lo_css_abort,
+                         (MKStreamWriteReadyFunc) lo_css_write_ready,
+                         s, context);
+}
+
+static void
+lo_css_link_exit_fn(URL_Struct *url_struct, int status, MWContext *context)
+{
+    lo_DestroyScriptData(url_struct->fe_data);
+    NET_FreeURLStruct(url_struct);
+    lo_unblock_script_tag(context, TRUE);
+}
+#endif /* NS_LIBCSS */
 
 static char script_reblock_tag[]   = "<" PT_NSCP_REBLOCK ">";
 

@@ -23,6 +23,10 @@
 /* #undef ALLOW_NEG_MARGINS */
 
 /* prefix for the implicit id's needed for style attributes */
+#ifdef NS_LIBCSS
+extern XP_Bool LO_IsStyledUnknownTag(lo_DocState *state, PA_Tag *tag, XP_Bool *is_void);
+#endif
+
 #define NSIMPLICITID "nsImplicitID"
 #define NS_STYLE_NAME_ATTR "ns_ss_name"
 

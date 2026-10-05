@@ -3381,7 +3381,16 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 	 * Mark it as such
 	 */
 	if(tag->type == P_UNKNOWN)
+	{
+		XP_Bool unknown_void;
+
 		is_table_relayout_begin_dummy_tag = TRUE;
+#ifdef NS_LIBCSS
+		/* an element the parser does not know (nav, section, ...) */
+		if(LO_IsStyledUnknownTag(state, tag, &unknown_void))
+			is_table_relayout_begin_dummy_tag = FALSE;
+#endif
+	}
 
 	page_break_property = STYLESTRUCT_GetString(style_struct, PAGE_BREAK_BEFORE_STYLE);
 	if (page_break_property)
@@ -4029,7 +4038,14 @@ lo_SetStyleSheetProperties(MWContext *context,
 
 	/* ignore uknown tags unless we are in the relayout phase */
 	if(tag->type == P_UNKNOWN && state->in_relayout == FALSE)
+	{
+#ifdef NS_LIBCSS
+		XP_Bool unknown_void;
+
+		if(!LO_IsStyledUnknownTag(state, tag, &unknown_void))
+#endif
 		return;
+	}
 
 	/* if we are hiding content skip applying styles */
 	if(state->hide_content)
@@ -4112,7 +4128,12 @@ lo_IsEmptyTag(TagType type)
        || type == P_DESC_TITLE
        || type == P_NSDT
        || type == P_DESC_TEXT
-       || type == P_BASE)
+       || type == P_BASE
+#ifdef NS_LIBCSS
+       /* no content: popped at once, so what follows is not inside it */
+       || type == P_LINK
+#endif
+       )
     {
         return TRUE;
     }
@@ -4242,7 +4263,13 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
         /* don't pop on unknown or empty tags.
          * we have already pop'd empty tags.
          */
-		if((tag->type != P_UNKNOWN || state->in_relayout)
+		XP_Bool unknown_void = FALSE;
+
+		if((tag->type != P_UNKNOWN || state->in_relayout
+#ifdef NS_LIBCSS
+			|| (LO_IsStyledUnknownTag(state, tag, &unknown_void) && !unknown_void)
+#endif
+			)
             && !lo_IsEmptyTag(tag->type))
 		{
 			if(state->top_state->style_stack)
@@ -6600,15 +6627,28 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 				PA_Block buff = lo_FetchParamValue(context, tag, PARAM_REL);
                 if (buff != NULL)
 				{
-					if (strcasestr((char *)buff, "stylesheet"))
+					if (strcasestr((char *)buff, "stylesheet")
+#ifdef NS_LIBCSS
+						/* alternate sheets are for the user to pick */
+						&& !(state->top_state && state->top_state->style_stack &&
+							 SML_UsesLibCSS(state->top_state->style_stack) &&
+							 strcasestr((char *)buff, "alternate"))
+#endif
+						)
 					{
 						char *media = (char*)lo_FetchParamValue(context, tag, PARAM_MEDIA);
 
 						/* check for media=screen
 						 * don't load the style sheet if there 
 						 * is a media not equal to screen
+						 * (libcss evaluates media itself)
 						 */
-						if(!media || !strcasecomp(media, "screen"))
+						if(!media || !strcasecomp(media, "screen")
+#ifdef NS_LIBCSS
+						   || (state->top_state && state->top_state->style_stack &&
+							   SML_UsesLibCSS(state->top_state->style_stack))
+#endif
+						   )
 						{
 							if(LO_StyleSheetsEnabled(context))
 							{
@@ -7225,7 +7265,13 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 
 	if(!tag->is_end)
 	{
-		if(!lo_IsEmptyTag(tag->type))
+		XP_Bool unknown_void = FALSE;
+
+#ifdef NS_LIBCSS
+		if(!LO_IsStyledUnknownTag(state, tag, &unknown_void))
+			unknown_void = FALSE;
+#endif
+		if(!lo_IsEmptyTag(tag->type) && !unknown_void)
 		{
 			lo_SetStyleSheetProperties(context, style_struct, tag);
 		}

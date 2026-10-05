@@ -48,6 +48,7 @@ typedef struct {
     char *name;
     char *class_name;
     char *id;
+    void *css_node;     /* NSCSS_Node, with NS_LIBCSS */
 
 } TagStruct;
 
@@ -123,5 +124,27 @@ struct JSSContext;
 
 extern void
 sml_GetJSSContext(StyleAndTagStack *styleStack, struct JSSContext *jc);
+
+/* With NS_LIBCSS (see nscss.h): CSS goes to libcss, not JavaScript. */
+
+/* Is CSS handled by libcss in this build? */
+extern XP_Bool SML_UsesLibCSS(StyleAndTagStack *styleStack);
+
+/* PushTag, with the tag's attribute text (tag->data) for attribute
+ * selectors, its style attribute, and the base URL for url()s in it. */
+extern PushTagStatus
+SML_PushTagWithAttrs(StyleAndTagStack *styleStack, char *name,
+                     char *class_name, char *id, const char *attrs,
+                     int32 attrs_len, const char *style, const char *base_url);
+
+/* Add an author style sheet (see NSCSS_AddSheet). */
+extern void
+SML_AddStyleSheet(StyleAndTagStack *styleStack, const char *url,
+                  const char *charset, const char *media,
+                  const char *data, int32 len);
+
+/* The window size, for media queries. */
+extern void
+SML_SetViewport(StyleAndTagStack *styleStack, int32 width, int32 height);
 
 #endif /* SML_HEADER */

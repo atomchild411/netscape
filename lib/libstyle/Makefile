@@ -29,6 +29,11 @@ CSRCS		= csslex.c \
 		  stystruc.c \
 		  $(NULL)
 
+# CSS by libcss, NetSurf's CSS engine (nscss.h)
+ifdef NS_LIBCSS
+CSRCS		+= nscss.c
+endif
+
 EXPORTS		= stystack.h stystruc.h css.h
 
 REQUIRES	= js nspr dbm img util layer
