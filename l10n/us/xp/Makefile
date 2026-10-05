@@ -86,14 +86,8 @@ about.h:	about-all.html
 	tee splash.input |						\
 	$(TR69) '[\001-\272]' '[\106-\377]' |				\
 	od -b |								\
-	sed    's/^[0-7][0-7]* *\(.*\)/\\\1/;				\
-		s/ /\\/g;						\
-		s/\(.*\)/ "\1"/;					\
-		s/^ *"\\"$$//' >> $@;					\
-	echo generating $*.pc from $<;					\
-	$(EMACS) -batch -q -l $(REAL_XPDIR)/html-to-pc.el		\
-		-f batch-html-to-pc $* $$RTMP $*.pc;			\
-	echo;								\
+	sed -e 's/^[0-7][0-7]* *\(.*\)/\\\1/' -e 's/ /\\/g'		\
+	    -e 's/\(.*\)/ "\1"/' -e 's/^ *"\\"$$//' >> $@;		\
 	$(RM) $$RTMP
 
 about-java.h:	about-all.html
@@ -118,14 +112,8 @@ about-java.h:	about-all.html
 	tee splash-java.input |						\
 	$(TR69) '[\001-\272]' '[\106-\377]' |				\
 	od -b |								\
-	sed    's/^[0-7][0-7]* *\(.*\)/\\\1/;				\
-		s/ /\\/g;						\
-		s/\(.*\)/ "\1"/;					\
-		s/^ *"\\"$$//' >> $@;					\
-	echo generating $*.pc from $<;					\
-	$(EMACS) -batch -q -l $(REAL_XPDIR)/html-to-pc.el		\
-		-f batch-html-to-pc $* $$RTMP $*.pc;			\
-	echo;								\
+	sed -e 's/^[0-7][0-7]* *\(.*\)/\\\1/' -e 's/ /\\/g'		\
+	    -e 's/\(.*\)/ "\1"/' -e 's/^ *"\\"$$//' >> $@;		\
 	$(RM) $$RTMP
 
 about-all.h:	about-all.html
