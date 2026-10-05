@@ -1700,6 +1700,22 @@ nscss_is_block(NSCSS_Node *node, uint8_t display)
 static void nscss_export_box(NSCSS_Doc *doc, NSCSS_Node *node,
 							 const css_computed_style *st, StyleStruct *style);
 
+/* A form control made fully transparent: pages draw their own widget
+ * over it (menus' checkboxes, custom selects); layout's would show. */
+static XP_Bool
+nscss_invisible_control(NSCSS_Node *node, const css_computed_style *st)
+{
+	const char *n = lwc_string_data(node->name);
+	css_fixed op = INTTOFIX(1);
+
+	if (strcasecomp(n, "input") && strcasecomp(n, "select") &&
+		strcasecomp(n, "textarea") && strcasecomp(n, "button"))
+		return FALSE;
+	if (css_computed_opacity(st, &op) != CSS_OPACITY_SET)
+		return FALSE;
+	return op <= 0;
+}
+
 /* Tags layout lays out as blocks whatever their display (lists move the
  * margin, tables and headings break lines): never flex row items. */
 static XP_Bool
@@ -1744,7 +1760,8 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	/* display */
 	t = css_computed_display_static(st);
 	if (t == CSS_DISPLAY_NONE || nscss_visually_hidden(st) ||
-		css_computed_visibility(st) == CSS_VISIBILITY_HIDDEN) {
+		css_computed_visibility(st) == CSS_VISIBILITY_HIDDEN ||
+		nscss_invisible_control(node, st)) {
 		nscss_set(style, DISPLAY_PROP, "none");
 		return;					/* layout applies nothing else */
 	}
@@ -1759,8 +1776,13 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	} else if (t == CSS_DISPLAY_GRID || t == CSS_DISPLAY_INLINE_GRID) {
 		node->flex_row = TRUE;
 	}
-	if (node->parent && node->parent->flex_row &&
-		!nscss_layout_block(lwc_string_data(node->name))) {
+	if ((node->parent && node->parent->flex_row &&
+		 !nscss_layout_block(lwc_string_data(node->name))) ||
+		/* floated list items: a menu bar, laid out as a flex row would
+		 * be (layout floats only images and tables) */
+		(!strcasecomp(lwc_string_data(node->name), "li") &&
+		 (css_computed_float(st) == CSS_FLOAT_LEFT ||
+		  css_computed_float(st) == CSS_FLOAT_RIGHT))) {
 		nscss_set(style, DISPLAY_PROP, "inline");
 		block = FALSE;
 		t = CSS_DISPLAY_INLINE;

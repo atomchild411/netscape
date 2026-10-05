@@ -4177,6 +4177,21 @@ static void lo_ProcessFontTag( lo_DocState *state, PA_Tag *tag, int32 fontSpecif
  *
  * Returns: Nothing
  *************************************/
+/* Form controls outside any form: pages put them anywhere now, and layout
+ * draws them only in a form.  Open one for them (it ends at the next FORM
+ * or /FORM); scripts handle what they do (qjs_dom.js never lets such a
+ * form be submitted). */
+static void
+lo_ensure_form(MWContext *context, lo_DocState *state, PA_Tag *tag)
+{
+	if (tag->is_end == FALSE && state->top_state->in_form == FALSE &&
+		state->top_state->scrolling_doc == FALSE)
+	{
+		lo_BeginForm(context, state, tag);
+		state->top_state->implicit_form = TRUE;
+	}
+}
+
 /* Does the style sheet make the tag being laid out inline? */
 Bool
 lo_TopStyleIsInline(lo_DocState *state)
@@ -6337,6 +6352,13 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 			}
 			if (tag->is_end == FALSE)
 			{
+				/* a real form ends the one stray controls opened */
+				if (state->top_state->in_form != FALSE &&
+					state->top_state->implicit_form != FALSE)
+				{
+					lo_EndForm(context, state);
+					state->top_state->implicit_form = FALSE;
+				}
 				/*
 				 * Sorry, no nested forms
 				 */
@@ -6351,6 +6373,7 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 			else if (state->top_state->in_form != FALSE)
 			{
 				lo_EndForm(context, state);
+				state->top_state->implicit_form = FALSE;
 				lo_SetLineBreakState(context, state, FALSE,
 									 LO_LINEFEED_BREAK_HARD, 2, FALSE);
 			}
@@ -6365,6 +6388,7 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 			/*
 			 * Input tags only inside an open form.
 			 */
+			lo_ensure_form(context, state, tag);
 			if ((state->top_state->in_form != FALSE)&&
 				(tag->is_end == FALSE))
 			{
@@ -6385,6 +6409,7 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 			/*
 			 * Textarea tags only inside an open form.
 			 */
+			lo_ensure_form(context, state, tag);
 			if (state->top_state->in_form != FALSE
 				&& !state->hide_content)
 			{
@@ -6503,6 +6528,7 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 			/*
 			 * Select tags only inside an open form.
 			 */
+			lo_ensure_form(context, state, tag);
 			if ((state->top_state->in_form != FALSE)&&
 				(!state->hide_content))
 			{

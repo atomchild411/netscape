@@ -749,6 +749,7 @@ struct lo_TopState_struct {
     PRPackedBool scrolling_doc;	/* Is this a special scrolling doc (hack) */
     PRPackedBool have_title;	/* set by first <TITLE> */
     PRPackedBool in_form;	/* true if in <FORM>...</FORM> */
+    PRPackedBool implicit_form;	/* the form is one a stray control opened */
     uint8 body_attr;		/* What attributes were set by BODY */
     char *unknown_head_tag;	/* ignore content in this case if non-NULL */
     char *base_target;		/* Base target of urls in this document */
