@@ -1241,13 +1241,53 @@ qjs_dom_error(JSContext *cx, dom_exception err)
 
 static void qjs_dom_schedule(MochaDecoder *decoder, qjs_Dom *dom);
 
+/* Would a change at NODE show?  Not if NODE is outside the document (a
+ * tree a script builds before putting it in), in the head, or in a script
+ * element: then laying the document out again is wasted. */
+static XP_Bool
+qjs_dom_shows(qjs_Dom *dom, dom_node *node)
+{
+	dom_node *n = (dom_node *) dom_node_ref(node), *p;
+
+	while (n) {
+		dom_node_type t;
+		if (n == (dom_node *) dom->doc) {
+			dom_node_unref(n);
+			return TRUE;
+		}
+		if (n == dom->head) {
+			dom_node_unref(n);
+			return FALSE;
+		}
+		if (dom_node_get_node_type(n, &t) == DOM_NO_ERR && t == DOM_ELEMENT_NODE) {
+			dom_string *nm = NULL;
+			XP_Bool script = FALSE;
+			if (dom_node_get_node_name(n, &nm) == DOM_NO_ERR && nm) {
+				script = !strcmp(dom_string_data(nm), "SCRIPT") ||
+						 !strcmp(dom_string_data(nm), "TEMPLATE");
+				dom_string_unref(nm);
+			}
+			if (script) {
+				dom_node_unref(n);
+				return FALSE;
+			}
+		}
+		p = NULL;
+		dom_node_get_parent_node(n, &p);
+		dom_node_unref(n);
+		n = p;
+	}
+	return FALSE;
+}
+
+/* A script changed the tree at NODE. */
 static void
-qjs_mutated(JSContext *cx)
+qjs_mutated(JSContext *cx, dom_node *node)
 {
 	MochaDecoder *decoder = (MochaDecoder *) JS_GetContextOpaque(cx);
 	qjs_Dom *dom = qjs_dom_of(decoder);
 
-	if (!dom)
+	if (!dom || dom->mutated || !qjs_dom_shows(dom, node))
 		return;
 	dom->mutated = TRUE;
 	qjs_dom_schedule(decoder, dom);
@@ -1364,7 +1404,7 @@ dom_set_data_fn(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *ar
 		return JS_EXCEPTION;
 	dom_node_set_node_value(n, s);
 	dom_string_unref(s);
-	qjs_mutated(cx);
+	qjs_mutated(cx, n);
 	return JS_UNDEFINED;
 }
 
@@ -1393,7 +1433,7 @@ dom_set_text_fn(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *ar
 		return JS_EXCEPTION;
 	err = dom_node_set_text_content(n, s);
 	dom_string_unref(s);
-	qjs_mutated(cx);
+	qjs_mutated(cx, n);
 	return err == DOM_NO_ERR ? JS_UNDEFINED : qjs_dom_error(cx, err);
 }
 
@@ -1432,7 +1472,7 @@ dom_set_attr_fn(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *ar
 	err = dom_element_set_attribute((dom_element *) n, name, v);
 	dom_string_unref(name);
 	dom_string_unref(v);
-	qjs_mutated(cx);
+	qjs_mutated(cx, n);
 	return err == DOM_NO_ERR ? JS_UNDEFINED : qjs_dom_error(cx, err);
 }
 
@@ -1446,7 +1486,7 @@ dom_rm_attr_fn(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *arg
 		return JS_EXCEPTION;
 	dom_element_remove_attribute((dom_element *) n, name);
 	dom_string_unref(name);
-	qjs_mutated(cx);
+	qjs_mutated(cx, n);
 	return JS_UNDEFINED;
 }
 
@@ -1562,7 +1602,7 @@ dom_insert_fn(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv
 		return qjs_dom_error(cx, err);
 	if (r)
 		dom_node_unref(r);
-	qjs_mutated(cx);
+	qjs_mutated(cx, parent);
 	return JS_DupValue(cx, argv[1]);
 }
 
@@ -1579,7 +1619,7 @@ dom_remove_fn(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv
 		return qjs_dom_error(cx, err);
 	if (r)
 		dom_node_unref(r);
-	qjs_mutated(cx);
+	qjs_mutated(cx, parent);
 	return JS_DupValue(cx, argv[1]);
 }
 
@@ -1597,7 +1637,7 @@ dom_replace_fn(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *arg
 		return qjs_dom_error(cx, err);
 	if (r)
 		dom_node_unref(r);
-	qjs_mutated(cx);
+	qjs_mutated(cx, parent);
 	return JS_DupValue(cx, argv[2]);
 }
 
@@ -3129,6 +3169,9 @@ qjs_DomLoaded(MochaDecoder *decoder)
 {
 	qjs_Dom *dom = qjs_dom_of(decoder);
 
+	if (getenv("QJS_DOM_TRACE"))
+		qjs_Log("dom: loaded");
+
 	if (dom && dom->mutated)
 		qjs_dom_schedule(decoder, dom);
 }
@@ -3151,6 +3194,8 @@ qjs_DomRelaidOut(MochaDecoder *decoder)
 
 	if (!dom || !dom->in_render)
 		return;
+	if (getenv("QJS_DOM_TRACE"))
+		qjs_Log("dom: laid out again");
 	dom->in_render = FALSE;
 	if (dom->mutated)
 		qjs_dom_schedule(decoder, dom);

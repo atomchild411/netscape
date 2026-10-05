@@ -60,6 +60,11 @@ qjs_Log(const char *fmt, ...)
 	}
 	if (!f)
 		return;
+	if (getenv("QJS_DOM_TRACE")) {		/* with the time, for tracing */
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		fprintf(f, "%ld.%03ld ", (long) tv.tv_sec % 10000, (long) tv.tv_usec / 1000);
+	}
 	va_start(ap, fmt);
 	vfprintf(f, fmt, ap);
 	va_end(ap);
