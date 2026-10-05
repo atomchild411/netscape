@@ -69,6 +69,123 @@ ns_resolve(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
 	return v;
 }
 
+/* ---- ES modules ----------------------------------------------------------
+ *
+ * QuickJS loads a module's imports synchronously, through the runtime's
+ * loader; netlib fetches asynchronously.  So qjs_dom.js fetches a module's
+ * whole graph first (its static imports, and literal dynamic ones) into
+ * __ns_modsrc (URL -> source); then evalModule runs the entry and the
+ * loader below serves the imports from there.  Specifiers are URLs relative
+ * to the importing module, or names in the page's import map
+ * (__ns_importmap).
+ */
+
+static JSValue
+qjs_global_fn(JSContext *cx, const char *name)
+{
+	JSValue g = JS_GetGlobalObject(cx), f = JS_GetPropertyStr(cx, g, name);
+
+	JS_FreeValue(cx, g);
+	return f;
+}
+
+char *
+qjs_ModuleNormalize(JSContext *cx, const char *base, const char *name,
+					void *opaque)
+{
+	char *abs, *r;
+
+	if (name[0] != '.' && name[0] != '/' && !XP_STRCHR(name, ':')) {
+		/* a bare specifier: the import map */
+		JSValue f = qjs_global_fn(cx, "__ns_importmap"), v = JS_UNDEFINED;
+		if (JS_IsFunction(cx, f)) {
+			JSValue a = JS_NewString(cx, name);
+			v = JS_Call(cx, f, JS_UNDEFINED, 1, &a);
+			JS_FreeValue(cx, a);
+		}
+		JS_FreeValue(cx, f);
+		if (JS_IsString(v)) {
+			const char *m = JS_ToCString(cx, v);
+			r = m ? js_strdup(cx, m) : NULL;
+			if (m)
+				JS_FreeCString(cx, m);
+			JS_FreeValue(cx, v);
+			return r;
+		}
+		JS_FreeValue(cx, v);
+		JS_ThrowTypeError(cx, "module specifier '%s' is not in the import map", name);
+		return NULL;
+	}
+	abs = NET_MakeAbsoluteURL((char *) base, (char *) name);
+	r = js_strdup(cx, abs ? abs : name);
+	XP_FREEIF(abs);
+	return r;
+}
+
+JSModuleDef *
+qjs_ModuleLoad(JSContext *cx, const char *name, void *opaque)
+{
+	JSValue map = qjs_global_fn(cx, "__ns_modsrc"), src, fn, meta;
+	JSModuleDef *m;
+	const char *text;
+	size_t len;
+
+	src = JS_IsObject(map) ? JS_GetPropertyStr(cx, map, name) : JS_UNDEFINED;
+	JS_FreeValue(cx, map);
+	if (!JS_IsString(src)) {
+		JS_FreeValue(cx, src);
+		JS_ThrowReferenceError(cx, "module '%s' was not loaded", name);
+		return NULL;
+	}
+	text = JS_ToCStringLen(cx, &len, src);
+	JS_FreeValue(cx, src);
+	if (!text)
+		return NULL;
+	fn = JS_Eval(cx, text, len, name, JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+	JS_FreeCString(cx, text);
+	if (JS_IsException(fn))
+		return NULL;
+	m = (JSModuleDef *) JS_VALUE_GET_PTR(fn);
+	meta = JS_GetImportMeta(cx, m);
+	if (JS_IsObject(meta)) {
+		JS_SetPropertyStr(cx, meta, "url", JS_NewString(cx, name));
+		JS_SetPropertyStr(cx, meta, "main", JS_FALSE);
+	}
+	JS_FreeValue(cx, meta);
+	JS_FreeValue(cx, fn);
+	return m;
+}
+
+/* evalModule(source, url): run a module (its imports must be in
+ * __ns_modsrc); a promise for its evaluation */
+static JSValue
+ns_eval_module(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	const char *src, *url;
+	size_t len;
+	JSValue v;
+
+	if (argc < 2 || !(src = JS_ToCStringLen(cx, &len, argv[0])))
+		return JS_EXCEPTION;
+	if (!(url = JS_ToCString(cx, argv[1]))) {
+		JS_FreeCString(cx, src);
+		return JS_EXCEPTION;
+	}
+	v = JS_Eval(cx, src, len, url, JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+	JS_FreeCString(cx, src);
+	if (!JS_IsException(v)) {
+		JSValue meta = JS_GetImportMeta(cx, (JSModuleDef *) JS_VALUE_GET_PTR(v));
+		if (JS_IsObject(meta)) {
+			JS_SetPropertyStr(cx, meta, "url", JS_NewString(cx, url));
+			JS_SetPropertyStr(cx, meta, "main", JS_TRUE);
+		}
+		JS_FreeValue(cx, meta);
+		v = JS_EvalFunction(cx, v);
+	}
+	JS_FreeCString(cx, url);
+	return v;
+}
+
 /* evalScript(source, url): run a script the page inserted, in the window */
 static JSValue
 ns_eval_script(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
@@ -521,6 +638,7 @@ static const JSCFunctionListEntry ns_functions[] = {
 	JS_CFUNC_DEF("timer", 3, ns_timer),
 	JS_CFUNC_DEF("resolve", 2, ns_resolve),
 	JS_CFUNC_DEF("evalScript", 2, ns_eval_script),
+	JS_CFUNC_DEF("evalModule", 2, ns_eval_module),
 	JS_CFUNC_DEF("load", 5, qjs_ns_load),
 	JS_CFUNC_DEF("clearTimer", 1, ns_clear_timer),
 };

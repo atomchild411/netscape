@@ -211,6 +211,7 @@ qjs_Runtime(void)
 
 	if (rt && !set) {
 		JS_SetInterruptHandler(rt, qjs_interrupt, NULL);
+		JS_SetModuleLoaderFunc(rt, qjs_ModuleNormalize, qjs_ModuleLoad, NULL);
 		set = TRUE;
 	}
 	return rt;

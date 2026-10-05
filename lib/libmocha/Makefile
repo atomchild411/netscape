@@ -77,6 +77,11 @@ endif
 
 include $(DEPTH)/config/rules.mk
 
+ifdef NS_QUICKJS
+# the DOM's JavaScript, built in (mkjsheader.py qjs_dom.js)
+$(OBJDIR)/qjs_dom.o: qjs_dom_js.h
+endif
+
 DEFINES		+= -DDLL_SUFFIX=\"$(DLL_SUFFIX)\"
 
 EMBED_CFLAGS	= $(CFLAGS) -I$(DEPTH)/lib/plugin

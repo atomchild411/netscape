@@ -62,6 +62,10 @@ extern void qjs_DomSyncNames(JSContext *cx);
 extern void qjs_DomLoaded(MochaDecoder *decoder);
 extern void qjs_DomRelaidOut(MochaDecoder *decoder);
 extern void qjs_DropLoads(MochaDecoder *decoder);
+extern char *qjs_ModuleNormalize(JSContext *cx, const char *base,
+								 const char *name, void *opaque);
+extern JSModuleDef *qjs_ModuleLoad(JSContext *cx, const char *name,
+								   void *opaque);
 extern JSValue qjs_ns_load(JSContext *cx, JSValueConst this_val, int argc,
 						   JSValueConst *argv);
 
