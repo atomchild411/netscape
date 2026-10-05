@@ -454,6 +454,17 @@ extern void il_destroy_image_transparent_pixel(il_container *ic);
    transparent pixel is set, and a background color was not specified for this
    image request, then a mask will also be allocated for the destination
    image. */
+/* ibuf.cpp: formats decoded whole (SVG, WebP); as in il_strm.h, whose
+ * exported copy an incremental build may not have refreshed */
+#ifndef IL_SVG
+#define IL_SVG     6
+#define IL_WEBP    7
+#endif
+extern int  il_buf_init(il_container *ic);
+extern int  il_buf_write(il_container *ic, const unsigned char *buf, int32 len);
+extern void il_buf_complete(il_container *ic);
+extern void il_buf_abort(il_container *ic);
+
 extern int  il_size(il_container *);
 
 extern int  il_setup_quantize(void);

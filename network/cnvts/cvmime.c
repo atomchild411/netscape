@@ -551,6 +551,9 @@ net_RegisterDefaultDecoders (void)
   NET_RegisterContentTypeConverter (IMAGE_PJPG,FO_PRESENT,NULL, IL_ViewStream);
   
   NET_RegisterContentTypeConverter (IMAGE_PNG, FO_PRESENT,NULL, IL_ViewStream);
+  /* drawn by modules/libimg/src/ibuf.cpp */
+  NET_RegisterContentTypeConverter ("image/svg+xml", FO_PRESENT, NULL, IL_ViewStream);
+  NET_RegisterContentTypeConverter ("image/webp", FO_PRESENT, NULL, IL_ViewStream);
 
   NET_RegisterContentTypeConverter (IMAGE_XBM, FO_PRESENT,NULL, IL_ViewStream);
   NET_RegisterContentTypeConverter (IMAGE_XBM2,FO_PRESENT,NULL, IL_ViewStream);
@@ -750,6 +753,9 @@ net_RegisterDefaultEncodingDecoders (void)
   NET_RegisterAllEncodingConverters (IMAGE_PJPG,      FO_PRESENT);
   
   NET_RegisterAllEncodingConverters (IMAGE_PNG,      FO_PRESENT);
+  /* SVG often comes compressed */
+  NET_RegisterAllEncodingConverters ("image/svg+xml", FO_PRESENT);
+  NET_RegisterAllEncodingConverters ("image/svg+xml", FO_INTERNAL_IMAGE);
   NET_RegisterAllEncodingConverters (IMAGE_XBM,       FO_PRESENT);
   NET_RegisterAllEncodingConverters (IMAGE_XBM2,      FO_PRESENT);
   NET_RegisterAllEncodingConverters (IMAGE_XBM3,      FO_PRESENT);

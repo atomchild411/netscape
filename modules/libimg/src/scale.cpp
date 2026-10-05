@@ -813,12 +813,19 @@ il_emit_row(
             il_alpha_mask(1,rgbbuf, (int)len, dcolumn_start, 
                 maskp, column_count,draw_mode);                
 
-            tmpbuf = rgbbuf;
-            for(i=0; i<column_count; i++){
-                *rgbbuf++ = *tmpbuf++;
-                *rgbbuf++ = *tmpbuf++;
-                *rgbbuf++ = *tmpbuf++;
-                tmpbuf++;  /* strip off alpha channel */
+            /* the whole source row (len pixels), which is scaled to
+               column_count after: stripping column_count of them left a
+               scaled-down image striped with alpha bytes read as colour */
+            /* (and not moving rgbbuf, which the scaling below reads) */
+            {
+                uint8 *outp = rgbbuf;
+                tmpbuf = rgbbuf;
+                for(i=0; i<len; i++){
+                    *outp++ = *tmpbuf++;
+                    *outp++ = *tmpbuf++;
+                    *outp++ = *tmpbuf++;
+                    tmpbuf++;  /* strip off alpha channel */
+                }
             }
         
         }

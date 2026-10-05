@@ -60,6 +60,7 @@ CPPSRCS		= color.cpp \
 		  dither.cpp \
 		  dummy_nc.cpp \
 		  external.cpp \
+		  ibuf.cpp \
 		  gif.cpp \
 		  if.cpp \
 		  ilclient.cpp \

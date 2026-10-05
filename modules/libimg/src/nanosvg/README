@@ -1,0 +1,5 @@
+nanosvg: a small SVG parser and rasterizer, by Mikko Mononen
+https://github.com/memononen/nanosvg, commit 239e102ec2c691f2902e20ace2ed36ee4a35cfe6
+(2026-07-09), unchanged.  zlib licence: LICENSE.txt.
+
+Used by ../ibuf.cpp to draw SVG images.

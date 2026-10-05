@@ -76,6 +76,8 @@ il_description_notify(il_container *ic)
     case IL_XBM : PL_strcpy(buf2, "XBM"); break;
     case IL_JPEG : PL_strcpy(buf2, "JPEG"); break;
     case IL_PNG : PL_strcpy(buf2, "PNG"); break;
+    case IL_SVG : PL_strcpy(buf2, "SVG"); break;
+    case IL_WEBP : PL_strcpy(buf2, "WebP"); break;
 
     default : PL_strcpy(buf2, "");
     }
@@ -747,6 +749,34 @@ il_type(int suspected_type, const char *buf, int32 len)
 		return IL_JPEG;
 	}
 
+	/* WebP: RIFF ... WEBP */
+	if (len >= 12 && !strncmp(buf, "RIFF", 4) && !strncmp(buf + 8, "WEBP", 4))
+	{
+		return IL_WEBP;
+	}
+
+	/* SVG: XML whose first element is svg (after a declaration, comments,
+	 * a doctype) */
+	{
+		int32 k = 0;
+
+		if (len >= 3 && (unsigned char) buf[0] == 0xEF &&
+			(unsigned char) buf[1] == 0xBB && (unsigned char) buf[2] == 0xBF)
+			k = 3;
+		while (k < len && (buf[k] == ' ' || buf[k] == '\t' || buf[k] == '\r' ||
+						   buf[k] == '\n'))
+			k++;
+		if (k + 4 <= len && buf[k] == '<' &&
+			(!strncmp(buf + k, "<svg", 4) || !strncmp(buf + k, "<?xml", 5) ||
+			 !strncmp(buf + k, "<!--", 4) || !strncmp(buf + k, "<!DOCTYPE svg", 13)))
+		{
+			int32 m;
+			for (m = k; m + 4 <= len && m < 4096; m++)
+				if (!strncmp(buf + m, "<svg", 4))
+					return IL_SVG;
+		}
+	}
+
 	/* no simple test for XBM vs, say, XPM so punt for now */
 	if (len >= 8 && !strncmp(buf, "#define ", 8) ) 
 	{
@@ -877,6 +907,16 @@ IL_StreamFirstWrite(il_container *ic, const unsigned char *str, int32 len)
             		ic->complete = il_png_complete;
 			break;
 
+
+		case IL_SVG:
+#ifdef NS_WEBP
+		case IL_WEBP:
+#endif
+			init = il_buf_init;
+			ic->write = il_buf_write;
+			ic->abort = il_buf_abort;
+			ic->complete = il_buf_complete;
+			break;
 
 		case IL_NOTFOUND:
 			ILTRACE(1,("il: html image"));
