@@ -977,9 +977,9 @@ $(OBJDIR)/e_kit.o:	e_kit.c e_kit_resources.h
 # Turn ekit app-defaults into a C file
 e_kit_resources.h: e_kit.ad
 	@echo 'char* fe_ekitDefaultDatabase = ' > $@
-	cat $< | tr '[\001-\272]' '[\106-\377]' | \
-        od -b | sed 's/^[0-7][0-7]* *\(.*\)/\\\1/; \
-		s/ /\\/g;s/\(.*\)/ "\1"/;s/^ *"\\"$$//' >> $@
+	cat $< | tr '[\001-\272]' '[\106-\377]' | od -b | \
+	sed -e 's/^[0-7][0-7]* *\(.*\)/\\\1/' -e 's/ /\\/g' \
+	    -e 's/\(.*\)/ "\1"/' -e 's/^ *"\\"$$//' >> $@
 	@echo ';' >> $@
 
 $(OBJDIR)/Netscape-nis-export.ad $(OBJDIR)/Netscape-export.ad: Makefile resources versionn.h strs make-resources $(LOCALE_MAP)
