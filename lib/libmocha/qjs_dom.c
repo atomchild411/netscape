@@ -86,6 +86,7 @@ typedef struct qjs_Dom {
 	int64			last_render;	/* ms */
 	XP_Bool			user_event;		/* a click or key since the last one */
 	XP_Bool			in_render;		/* our layout is under way */
+	XP_Bool			module_scripts;	/* the page has <script type=module> */
 } qjs_Dom;
 
 static JSClassID qjs_node_class;
@@ -747,6 +748,17 @@ qjs_dom_start_tag(MWContext *context, qjs_Dom *dom, PA_Tag *tag,
 	if (qjs_in_list(name, qjs_named_tags))
 		qjs_dom_named(dom, el);
 	if (!strcmp(name, "script")) {
+		dom_string *k = qjs_dstr("type", 4), *v = NULL;
+		if (k) {
+			dom_element_get_attribute((dom_element *) el, k, &v);
+			dom_string_unref(k);
+		}
+		if (v) {
+			if (dom_string_byte_length(v) == 6 &&
+				!strncasecmp(dom_string_data(v), "module", 6))
+				dom->module_scripts = TRUE;
+			dom_string_unref(v);
+		}
 		if (dom->current_script)
 			dom_node_unref(dom->current_script);
 		dom->current_script = (dom_node *) dom_node_ref(el);
@@ -2870,6 +2882,16 @@ qjs_DomLoaded(MochaDecoder *decoder)
 
 	if (dom && dom->mutated)
 		qjs_dom_schedule(decoder, dom);
+}
+
+/* Does the page have module scripts (which run at its load event, so
+ * need a context even if no other script made one)? */
+XP_Bool
+qjs_DomHasModules(MochaDecoder *decoder)
+{
+	qjs_Dom *dom = qjs_dom_of(decoder);
+
+	return dom && dom->module_scripts;
 }
 
 /* A resize reload is over. */

@@ -794,6 +794,9 @@ qjs_SendLoadEvent(MWContext *context, int32 type, JSBool resize_reload)
 {
 	MochaDecoder *decoder = qjs_GetDecoder(context, FALSE);
 
+	if (decoder && !decoder->js_context && type == EVENT_LOAD &&
+		!resize_reload && qjs_DomHasModules(decoder))
+		qjs_GetContext(decoder);
 	if (!decoder || !decoder->js_context)
 		return;
 	switch (type) {

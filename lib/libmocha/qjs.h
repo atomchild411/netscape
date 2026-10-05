@@ -60,6 +60,7 @@ extern JSBool qjs_DomEvent(MWContext *context, LO_Element *element,
 						   JSEvent *event);
 extern void qjs_DomSyncNames(JSContext *cx);
 extern void qjs_DomLoaded(MochaDecoder *decoder);
+extern XP_Bool qjs_DomHasModules(MochaDecoder *decoder);
 extern void qjs_DomRelaidOut(MochaDecoder *decoder);
 extern void qjs_DropLoads(MochaDecoder *decoder);
 extern char *qjs_ModuleNormalize(JSContext *cx, const char *base,
