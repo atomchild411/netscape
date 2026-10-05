@@ -100,7 +100,9 @@ static const char nscss_ua_sheet[] =
 	" border-top-color: " NSCSS_MARK_COLOR ";"
 	" text-decoration: blink;"
 	" display: table-column-group;"
-	" }\n";
+	" }\n"
+	/* what HTML hides (scripts set hidden; template content is inert) */
+	"[hidden], template { display: none; }\n";
 
 struct NSCSS_Doc {
 	css_select_ctx	*ctx;		/* user agent sheet and the page's */

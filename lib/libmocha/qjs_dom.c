@@ -28,6 +28,9 @@
 #include "lo_ele.h"
 #include "layout.h"
 #include "prprf.h"
+#include "shist.h"
+#include "fe_proto.h"
+#include <sys/time.h>
 
 #include <dom/dom.h>
 #include <dom/bindings/hubbub/parser.h>
@@ -76,6 +79,13 @@ typedef struct qjs_Dom {
 	 * (document.NAME, form.NAME: __ns_names in qjs_dom.js) */
 	dom_node		**named;
 	uint32			nnamed, ncap;
+	/* showing what scripts changed: the document laid out again from the
+	 * tree (qjs_dom_render) */
+	void			*render_timer;
+	int32			renders;
+	int64			last_render;	/* ms */
+	XP_Bool			user_event;		/* a click or key since the last one */
+	XP_Bool			in_render;		/* our layout is under way */
 } qjs_Dom;
 
 static JSClassID qjs_node_class;
@@ -191,6 +201,8 @@ qjs_DomFree(MochaDecoder *decoder)
 
 	if (!dom)
 		return;
+	if (dom->render_timer)
+		FE_ClearTimeout(dom->render_timer);
 	qjs_dom_free_wrappers(dom);
 	for (i = 0; i < dom->nheld; i++)
 		dom_node_unref(dom->held[i]);
@@ -764,7 +776,7 @@ qjs_dom_remap(qjs_Dom *dom, PA_Tag *tag, const char *name)
 	dom_string *want;
 	int steps;
 
-	if (tag->is_end || !name[0])
+	if (tag->is_end || !name[0] || !strcmp(name, "base"))
 		return;
 	if (!dom->cursor)
 		dom->cursor = (dom_node *) dom_node_ref(dom->doc);
@@ -829,6 +841,8 @@ LM_DomTag(MWContext *context, PA_Tag *tag)
 		return;
 	dom = qjs_dom_of(decoder);
 	if (dom && dom->resize_pending) {
+		if (getenv("QJS_DOM_TRACE"))
+			qjs_Log("dom: remapping the laid out document");
 		dom->resize_pending = FALSE;
 		dom->remap = TRUE;
 		dom->doc_id = XP_DOCID(context);
@@ -841,6 +855,8 @@ LM_DomTag(MWContext *context, PA_Tag *tag)
 		dom = NULL;
 	}
 	if (!dom) {
+		if (getenv("QJS_DOM_TRACE"))
+			qjs_Log("dom: new document %ld", (long) XP_DOCID(context));
 		decoder->doc_id = XP_DOCID(context);
 		dom = qjs_dom_new(decoder);
 		if (!dom)
@@ -1143,13 +1159,18 @@ qjs_dom_error(JSContext *cx, dom_exception err)
 							 ? names[e] : "error");
 }
 
+static void qjs_dom_schedule(MochaDecoder *decoder, qjs_Dom *dom);
+
 static void
 qjs_mutated(JSContext *cx)
 {
-	qjs_Dom *dom = qjs_cx_dom(cx);
+	MochaDecoder *decoder = (MochaDecoder *) JS_GetContextOpaque(cx);
+	qjs_Dom *dom = qjs_dom_of(decoder);
 
-	if (dom)
-		dom->mutated = TRUE;
+	if (!dom)
+		return;
+	dom->mutated = TRUE;
+	qjs_dom_schedule(decoder, dom);
 }
 
 /* ---- natives: the tree ------------------------------------------------- */
@@ -2441,6 +2462,7 @@ typedef struct {
 	char *buf;
 	size_t len, cap;
 	XP_Bool failed;
+	XP_Bool for_layout;		/* scripts left out (they have run) */
 } qjs_Buf;
 
 static void
@@ -2545,7 +2567,8 @@ qjs_serialise(qjs_Buf *b, dom_node *n, XP_Bool raw_text)
 		dom_string_unref(s);
 		buf_str(b, "<");
 		buf_str(b, name);
-		if (dom_node_get_attributes(n, &map) == DOM_NO_ERR && map) {
+		if ((!b->for_layout || strcmp(name, "script")) &&
+			dom_node_get_attributes(n, &map) == DOM_NO_ERR && map) {
 			dom_namednodemap_get_length(map, &na);
 			for (k = 0; k < na; k++) {
 				dom_attr *at = NULL;
@@ -2573,6 +2596,10 @@ qjs_serialise(qjs_Buf *b, dom_node *n, XP_Bool raw_text)
 		buf_str(b, ">");
 		if (qjs_in_list(name, qjs_void_tags))
 			return;
+		if (b->for_layout && !strcmp(name, "script")) {
+			buf_str(b, "</script>");
+			return;
+		}
 		raw = !strcmp(name, "script") || !strcmp(name, "style") ||
 			  !strcmp(name, "xmp") || !strcmp(name, "plaintext") ||
 			  !strcmp(name, "noscript");
@@ -2786,6 +2813,141 @@ static const JSCFunctionListEntry qjs_dom_functions[] = {
 	JS_CFUNC_DEF("mutated", 0, dom_mutated_fn),
 };
 
+/* ---- showing what scripts changed -----------------------------------------
+ *
+ * After the page has loaded, a change a script makes to the tree is shown
+ * by laying the document out again from the tree: the tree is written out
+ * as HTML (scripts left out: they have run) into the cache under a
+ * wysiwyg: URL, the history entry points there, and the window is laid
+ * out again as for a resize (fe_ReLayout), which keeps the scroll position
+ * and the form fields, and runs no scripts.  Layout's tags find their
+ * elements again (qjs_dom_remap).  Changes made while the page loads are
+ * shown once it has loaded.  Soon after a click or key; otherwise at most
+ * every few seconds, and only so often, for pages that keep changing.
+ */
+
+extern void FE_RelayoutFromText(MWContext *context, const char *text, int32 len);
+
+#define QJS_RENDER_DELAY		50		/* ms after a change */
+#define QJS_RENDER_INTERVAL		3000	/* ms between unprompted ones */
+#define QJS_RENDER_UNPROMPTED	12		/* that many, then only after events */
+
+
+static int64
+qjs_now_ms(void)
+{
+	struct timeval tv;
+
+	gettimeofday(&tv, NULL);
+	return (int64) tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
+
+static void qjs_dom_render_timeout(void *closure);
+
+static void
+qjs_dom_schedule(MochaDecoder *decoder, qjs_Dom *dom)
+{
+	int64 wait = QJS_RENDER_DELAY, since;
+
+	if (getenv("QJS_DOM_TRACE"))
+		qjs_Log("dom: schedule (loaded %d, timer %d, renders %d)",
+				decoder->load_event_sent, dom->render_timer != NULL, (int) dom->renders);
+	if (!decoder->load_event_sent || dom->render_timer || dom->in_render)
+		return;
+	if (!dom->user_event) {
+		if (dom->renders >= QJS_RENDER_UNPROMPTED)
+			return;
+		since = qjs_now_ms() - dom->last_render;
+		if (since < QJS_RENDER_INTERVAL)
+			wait = QJS_RENDER_INTERVAL - since;
+	}
+	dom->render_timer = FE_SetTimeout(qjs_dom_render_timeout, decoder, (uint32) wait);
+}
+
+/* The page has loaded (its load handlers have run): show what its
+ * scripts changed. */
+void
+qjs_DomLoaded(MochaDecoder *decoder)
+{
+	qjs_Dom *dom = qjs_dom_of(decoder);
+
+	if (dom && dom->mutated)
+		qjs_dom_schedule(decoder, dom);
+}
+
+/* A resize reload is over: ours, or the window's (which laid out the
+ * page's source, not the tree scripts changed: do that again). */
+void
+qjs_DomRelaidOut(MochaDecoder *decoder)
+{
+	qjs_Dom *dom = qjs_dom_of(decoder);
+
+	if (!dom)
+		return;
+	if (dom->in_render) {
+		dom->in_render = FALSE;
+		if (dom->mutated)
+			qjs_dom_schedule(decoder, dom);
+		return;
+	}
+	if (dom->renders > 0) {
+		dom->mutated = TRUE;
+		dom->user_event = TRUE;
+		qjs_dom_schedule(decoder, dom);
+	}
+}
+
+static void
+qjs_dom_render(MochaDecoder *decoder, qjs_Dom *dom)
+{
+	MWContext *context = decoder->window_context;
+	qjs_Buf b = { 0 };
+	char *text;
+	size_t len;
+
+	b.for_layout = TRUE;
+	qjs_serialise(&b, (dom_node *) dom->doc, FALSE);
+	if (b.failed || !b.buf) {
+		XP_FREEIF(b.buf);
+		return;
+	}
+	text = qjs_ToDocumentCharset(context, b.buf, b.len, &len);
+	XP_FREE(b.buf);
+	if (!text)
+		return;
+	dom->mutated = FALSE;
+	dom->user_event = FALSE;
+	dom->renders++;
+	dom->last_render = qjs_now_ms();
+	dom->in_render = TRUE;
+	if (getenv("QJS_DOM_TRACE"))
+		qjs_Log("dom: laying the document out again (%ld bytes)", (long) len);
+	FE_RelayoutFromText(context, text, (int32) len);
+	XP_FREE(text);
+}
+
+static void
+qjs_dom_render_timeout(void *closure)
+{
+	MochaDecoder *decoder = (MochaDecoder *) closure;
+	qjs_Dom *dom = qjs_dom_of(decoder);
+
+	if (!dom)
+		return;
+	dom->render_timer = NULL;
+	if (getenv("QJS_DOM_TRACE"))
+		qjs_Log("dom: render timeout (mutated %d, busy %d)", dom->mutated,
+				decoder->window_context ? XP_IsContextBusy(decoder->window_context) : -1);
+	if (!dom->mutated || !decoder->window_context)
+		return;
+	if (XP_IsContextBusy(decoder->window_context)) {
+		/* still loading something (an image ...): later */
+		dom->render_timer = FE_SetTimeout(qjs_dom_render_timeout, decoder, 500);
+		return;
+	}
+	qjs_dom_render(decoder, dom);
+}
+
 /* ---- set up, and events from layout ------------------------------------- */
 
 #include "qjs_dom_js.h"		/* qjs_dom_js: the DOM's JavaScript */
@@ -2825,6 +2987,13 @@ qjs_DomEvent(MWContext *context, LO_Element *element, JSEvent *event)
 
 	if (!cx || !node)
 		return TRUE;
+	if (event->type & (EVENT_CLICK | EVENT_DBLCLICK | EVENT_MOUSEUP |
+					   EVENT_KEYUP | EVENT_KEYPRESS | EVENT_CHANGE |
+					   EVENT_SUBMIT | EVENT_RESET)) {
+		qjs_Dom *dom = qjs_dom_of(decoder);
+		if (dom)
+			dom->user_event = TRUE;
+	}
 	switch (event->type) {
 	case EVENT_CLICK:		type = "click"; break;
 	case EVENT_DBLCLICK:	type = "dblclick"; break;

@@ -38,9 +38,9 @@ qjs_doc_url(MochaDecoder *d)
 	History_entry *he;
 
 	if (d->url_struct && d->url_struct->address)
-		return d->url_struct->address;
+		return LM_StripWysiwygURLPrefix(d->url_struct->address);
 	he = SHIST_GetCurrent(&d->window_context->hist);
-	return he ? he->address : "";
+	return he ? LM_StripWysiwygURLPrefix(he->address) : "";
 }
 
 /* ---- natives -------------------------------------------------------------- */
@@ -680,10 +680,15 @@ qjs_SendLoadEvent(MWContext *context, int32 type, JSBool resize_reload)
 		return;
 	switch (type) {
 	case EVENT_LOAD:
-		if (resize_reload || decoder->load_event_sent)
+		if (resize_reload) {
+			qjs_DomRelaidOut(decoder);
+			return;
+		}
+		if (decoder->load_event_sent)
 			return;
 		decoder->load_event_sent = TRUE;
 		qjs_fire(decoder->js_context, "load");
+		qjs_DomLoaded(decoder);
 		break;
 	case EVENT_UNLOAD:
 		if (!resize_reload)

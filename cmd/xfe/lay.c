@@ -3103,6 +3103,100 @@ fe_ReLayout (MWContext *context, NET_ReloadMethod force_reload)
 }
 
 
+#ifdef NS_QUICKJS
+/* Feed a layout stream as netlib would: only what it is ready for (a
+ * resize reload holds the parser until the old document has gone). */
+typedef struct {
+  MWContext *context;
+  NET_StreamClass *stream;
+  char *text;
+  int32 len, off;
+} fe_RelayoutPump;
+
+static void
+fe_relayout_pump (void *closure)
+{
+  fe_RelayoutPump *p = (fe_RelayoutPump *) closure;
+
+  while (p->off < p->len)
+    {
+      unsigned int ready = (*p->stream->is_write_ready) (p->stream);
+      int32 n = p->len - p->off;
+      if (ready == 0)
+	{
+	  FE_SetTimeout (fe_relayout_pump, p, 20);
+	  return;
+	}
+      if (n > (int32) ready)
+	n = (int32) ready;
+      if ((*p->stream->put_block) (p->stream, p->text + p->off, n) < 0)
+	{
+	  (*p->stream->abort) (p->stream, -1);
+	  goto done;
+	}
+      p->off += n;
+    }
+  (*p->stream->complete) (p->stream);
+  /* no URL of netlib's was loading: put the status line back */
+  if (!XP_IsContextBusy (p->context))
+    FE_AllConnectionsComplete (p->context);
+ done:
+  XP_FREE (p->stream);
+  XP_FREE (p->text);
+  XP_FREE (p);
+}
+
+/* Lay the window's document out again from TEXT, HTML in the document's
+ * encoding: what its scripts changed (lib/libmocha/qjs_dom.c).  As
+ * fe_ReLayout does for a resize: the scroll position and the form fields
+ * are kept, and layout runs no scripts (resize_reload); but the text comes
+ * from the caller, not from netlib. */
+void
+FE_RelayoutFromText (MWContext *context, const char *text, int32 len)
+{
+  LO_Element *e = LO_XYToNearestElement (context,
+					 CONTEXT_DATA (context)->document_x,
+					 CONTEXT_DATA (context)->document_y,
+                                         NULL);
+  History_entry *he = SHIST_GetCurrent (&context->hist);
+  URL_Struct *url;
+  fe_RelayoutPump *p;
+
+  if (!he)
+    return;
+  if (e)
+    SHIST_SetPositionOfCurrentDoc (&context->hist, e->lo_any.ele_id);
+  url = SHIST_CreateURLStructFromHistoryEntry (context, he);
+  if (!url)
+    return;
+  url->force_reload = NET_RESIZE_RELOAD;
+  url->resize_reload = TRUE;
+  StrAllocCopy (url->content_type, TEXT_HTML);
+  p = XP_NEW_ZAP (fe_RelayoutPump);
+  if (p)
+    p->text = (char *) XP_ALLOC (len > 0 ? len : 1);
+  if (!p || !p->text)
+    {
+      XP_FREEIF (p);
+      NET_FreeURLStruct (url);
+      return;
+    }
+  XP_MEMCPY (p->text, text, len);
+  p->len = len;
+  p->context = context;
+  p->stream = NET_StreamBuilder (FO_PRESENT, url, context);
+  if (!p->stream)
+    {
+      XP_FREE (p->text);
+      XP_FREE (p);
+      NET_FreeURLStruct (url);
+      return;
+    }
+  /* layout keeps url (its top state's nurl) */
+  fe_relayout_pump (p);
+}
+#endif /* NS_QUICKJS */
+
 /* Following links */
 
 /* Returns the URL string of the LO_Element, if it has one.

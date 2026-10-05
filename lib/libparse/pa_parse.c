@@ -466,6 +466,11 @@ pa_unload_complete(NET_StreamClass *stream)
            either a document.write or encountering a <SCRIPT> tag, neither
            of which should have happened. */
         XP_ASSERT(doc_data->overflow_depth == 1);
+
+	/* The old document has gone: let the parser go on (pa_FlushOverflow
+	 * does nothing while the depth is up). */
+	if (doc_data->overflow_depth > 0)
+		doc_data->overflow_depth--;
         
 	/* flush any old data that has built up */
 	pa_FlushOverflow(stream);

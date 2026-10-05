@@ -59,6 +59,8 @@ extern void qjs_DomResizeReload(MochaDecoder *decoder);
 extern JSBool qjs_DomEvent(MWContext *context, LO_Element *element,
 						   JSEvent *event);
 extern void qjs_DomSyncNames(JSContext *cx);
+extern void qjs_DomLoaded(MochaDecoder *decoder);
+extern void qjs_DomRelaidOut(MochaDecoder *decoder);
 extern void qjs_DropLoads(MochaDecoder *decoder);
 extern JSValue qjs_ns_load(JSContext *cx, JSValueConst this_val, int argc,
 						   JSValueConst *argv);
