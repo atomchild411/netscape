@@ -20,9 +20,13 @@ DEPTH		= ../../..
 MODULE		= hook
 LIBRARY_NAME	= hook
 
+ifdef NS_QUICKJS
+CSRCS		= hk_none.c
+else
 CSRCS		= hk_conf.c hk_file.c hk_hook.c hk_init.c hk_tag.c
+endif
 
-REQUIRES	= libxp util js img layer parse hook pref dbm nspr
+REQUIRES	= libxp util img layer parse hook pref dbm nspr
 
 LOCAL_INCLUDES	= -I.
 

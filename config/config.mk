@@ -470,6 +470,11 @@ ifdef NS_LIBCSS
 DEFINES		+= -DNS_LIBCSS
 endif
 
+# JavaScript on QuickJS (lib/libmocha/qjs.h); the 1998 engine (js/) is not built
+ifdef NS_QUICKJS
+DEFINES		+= -DNS_QUICKJS
+endif
+
 ifdef NS_OPENSSL
 DEFINES		+= -DNS_OPENSSL
 ifdef NS_CA_FILE

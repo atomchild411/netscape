@@ -22,7 +22,9 @@ NSPR20		= 1
 MOZILLA_CLIENT	= 1
 
 ifndef NO_MOCHA
+ifndef NS_QUICKJS
 DIRS_JS		= js
+endif
 endif
 
 DIRS		= config coreconf $(NSPRDIR) jpeg dbm xpcom network

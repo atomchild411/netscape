@@ -22,7 +22,9 @@
 #include "mkutils.h"
 #include "netutils.h"
 #include "xpgetstr.h"
+#ifndef NS_QUICKJS
 #include "jsapi.h"
+#endif
 #include "fe_proto.h"
 
 static XP_Bool                  m_GettingConfigFile = FALSE;
@@ -253,6 +255,24 @@ failed:
 PRIVATE XP_Bool
 jsc_check_for_find_proxy(void)
 {
+#ifdef NS_QUICKJS
+	JSContext *configContext = NULL;
+	JSValue global, pc, fn;
+	XP_Bool is_fn = FALSE;
+
+	PREF_GetConfigContext(&configContext);
+	if (!configContext)
+		return FALSE;
+	global = JS_GetGlobalObject(configContext);
+	pc = JS_GetPropertyStr(configContext, global, "ProxyConfig");
+	fn = JS_IsObject(pc) ? JS_GetPropertyStr(configContext, pc, "FindProxyForURL")
+						 : JS_UNDEFINED;
+	is_fn = JS_IsFunction(configContext, fn);
+	JS_FreeValue(configContext, fn);
+	JS_FreeValue(configContext, pc);
+	JS_FreeValue(configContext, global);
+	return is_fn;
+#else
 	JSObject* globalConfig;
 	JSContext* configContext;
 	char buf[1024];
@@ -267,6 +287,7 @@ jsc_check_for_find_proxy(void)
 						&rv);
 
 	return (ok && JSVAL_IS_BOOLEAN(rv) && JSVAL_TO_BOOLEAN(rv) == JS_TRUE);
+#endif
 }
 
 

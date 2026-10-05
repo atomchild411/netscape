@@ -29,7 +29,11 @@
      </font>
   **/
 
+#ifdef NS_QUICKJS
+#include <quickjs/quickjs.h>
+#else
 #include "jsapi.h"
+#endif
 #include "xp_core.h"
 #include "xp_mcom.h"
 #include "xp_qsort.h"
@@ -60,10 +64,24 @@
 #pragma require_prototypes off
 #endif
 
+#ifndef NS_QUICKJS
 JSTaskState *			m_mochaTaskState = NULL;
 JSContext *				m_mochaContext = NULL;
 JSObject *				m_mochaPrefObject = NULL;
 JSObject *			    m_GlobalConfigObject = NULL;
+#endif /* !NS_QUICKJS */
+#ifdef NS_QUICKJS
+/* The one QuickJS runtime (libmocha and proxy auto-config make their
+ * contexts on it) and the configuration context: the preference files and
+ * the configuration scripts run there. */
+static JSRuntime *			m_jsRuntime = NULL;
+static JSContext *			m_jsContext = NULL;
+static PRBool pref_InitQuickJS(void);
+static void pref_ReportException(JSContext *cx, const char *filename);
+#define PREF_JS_READY	m_jsContext
+#else
+#define PREF_JS_READY	m_mochaPrefObject
+#endif
 
 static char *				m_filename = NULL;
 static char *				m_lifilename = NULL;
@@ -100,7 +118,9 @@ typedef struct
 	uint8		flags;
 } PrefNode;
 
+#ifndef NS_QUICKJS
 static JSBool pref_HashJSPref(unsigned int argc, jsval *argv, PrefAction action);
+#endif /* !NS_QUICKJS */
 
 /* Hash table allocation */
 PR_IMPLEMENT(void *)
@@ -167,11 +187,14 @@ int pref_CopyCharPref(const char *pref_name, char ** return_buffer, XP_Bool get_
 int pref_GetIntPref(const char *pref_name,int32 * return_int, XP_Bool get_default);
 int pref_GetBoolPref(const char *pref_name, XP_Bool * return_value, XP_Bool get_default);
 
+#ifndef NS_QUICKJS
 JSBool PR_CALLBACK pref_BranchCallback(JSContext *cx, JSScript *script);
 void pref_ErrorReporter(JSContext *cx, const char *message,JSErrorReport *report);
+#endif /* !NS_QUICKJS */
 void pref_Alert(char* msg);
 int pref_HashPref(const char *key, PrefValue value, PrefType type, PrefAction action);
 
+#ifndef NS_QUICKJS
 /* -- Platform specific function extern */
 #if !defined(XP_WIN) && !defined(XP_OS2)
 extern JSBool pref_InitInitialObjects(void);
@@ -222,6 +245,7 @@ PRIVATE JSClass autoconf_class = {
     JS_PropertyStub, JS_PropertyStub, JS_PropertyStub, JS_PropertyStub,
     JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, JS_FinalizeStub
 };
+#endif /* !NS_QUICKJS */
 
 int pref_OpenFile(const char* filename, XP_Bool is_error_fatal, XP_Bool verifyHash, XP_Bool bGlobalContext)
 {
@@ -249,7 +273,7 @@ int pref_OpenFile(const char* filename, XP_Bool is_error_fatal, XP_Bool verifyHa
 				ok = PREF_BAD_LOCKFILE;
 			}
 			else if ( PREF_EvaluateConfigScript(readBuf, fileLength,
-						filename, bGlobalContext, FALSE ) == JS_TRUE )
+						filename, bGlobalContext, FALSE ) )
 			{
 				ok = PREF_NOERROR;
 			}
@@ -266,7 +290,12 @@ int pref_OpenFile(const char* filename, XP_Bool is_error_fatal, XP_Bool verifyHa
 			MessageBox(NULL,"Error in preference file (prefs.js).  Default preferences will be used.","Netscape - Warning", MB_OK);
 #endif
 	}
+#ifdef NS_QUICKJS
+	if (m_jsRuntime)
+		JS_RunGC(m_jsRuntime);
+#else
 	JS_GC(m_mochaContext);
+#endif
 	return (ok);
 }
 
@@ -344,7 +373,7 @@ PREF_ReadUserJSFile(char *filename)
 PR_IMPLEMENT(int)
 PREF_Init(char *filename)
 {
-    JSBool ok = JS_TRUE;
+    int ok = 1;
 
 	/* --ML hash test */
 	if (!m_HashTable)
@@ -359,6 +388,10 @@ PREF_Init(char *filename)
         m_filename = strdup(filename);
     }
 
+#ifdef NS_QUICKJS
+    if (!m_jsContext)
+        ok = pref_InitQuickJS();
+#else
     if (!m_mochaTaskState)
 		m_mochaTaskState = JS_Init((uint32) 0xffffffffL);
 
@@ -406,8 +439,10 @@ PREF_Init(char *filename)
 #endif
 	}
 
+#endif /* NS_QUICKJS */
+
 	if (ok && filename) {
-	    ok = (JSBool) (pref_OpenFile(filename, TRUE, FALSE, FALSE) == PREF_NOERROR);
+	    ok = (pref_OpenFile(filename, TRUE, FALSE, FALSE) == PREF_NOERROR);
 	}
 	else if (!ok) {
 		m_ErrorOpeningUserPrefs = TRUE;
@@ -415,6 +450,21 @@ PREF_Init(char *filename)
 	return ok;
 }
 
+#ifdef NS_QUICKJS
+PR_IMPLEMENT(int)
+PREF_GetConfigContext(JSContext **js_context)
+{
+	if (!js_context) return FALSE;
+	*js_context = m_jsContext;
+	return TRUE;
+}
+
+PR_IMPLEMENT(JSRuntime *)
+PREF_GetJSRuntime(void)
+{
+	return m_jsRuntime;
+}
+#else
 PR_IMPLEMENT(int)
 PREF_GetConfigContext(JSContext **js_context)
 {
@@ -451,6 +501,8 @@ PREF_GetPrefConfigObject(JSObject **js_object)
 	return TRUE;
 }
 
+#endif /* NS_QUICKJS */
+
 /* Frees the callback list. */
 PR_IMPLEMENT(void)
 PREF_Cleanup()
@@ -464,10 +516,16 @@ PREF_Cleanup()
 		XP_FREE(node);
 		node = next_node;
 	}
+#ifdef NS_QUICKJS
+	/* the runtime outlives this: libmocha's contexts live on it */
+	if (m_jsContext) JS_FreeContext(m_jsContext);
+	m_jsContext = NULL;
+#else
 	if (m_mochaContext) JS_DestroyContext(m_mochaContext);
 	if (m_mochaTaskState) JS_Finish(m_mochaTaskState);                      
 	m_mochaContext = NULL;
 	m_mochaTaskState = NULL;
+#endif
 	
 	if (m_HashTable)
 		PR_HashTableDestroy(m_HashTable);
@@ -487,6 +545,72 @@ PREF_ReadLockFile(const char *filename)
 	return PREF_ERROR;
 }
 
+#ifdef NS_QUICKJS
+/* Evaluate BUFFER in the configuration context.  The preference functions
+ * are globals there (and methods of PrefConfig), so the scope arguments of
+ * the old engine make no difference. */
+static PRBool
+pref_Evaluate(const char *js_buffer, size_t length, const char *filename,
+			  XP_Bool report)
+{
+	JSValue v;
+	char *buf;
+	PRBool ok = PR_TRUE;
+
+	if (!m_jsContext)
+		return PR_FALSE;
+	/* QuickJS wants the text NUL-terminated */
+	buf = (char *) malloc(length + 1);
+	if (!buf)
+		return PR_FALSE;
+	memcpy(buf, js_buffer, length);
+	buf[length] = '\0';
+	v = JS_Eval(m_jsContext, buf, length, filename ? filename : "<prefs>",
+				JS_EVAL_TYPE_GLOBAL);
+	free(buf);
+	if (JS_IsException(v)) {
+		ok = PR_FALSE;
+		if (report)
+			pref_ReportException(m_jsContext, filename);
+		else
+			JS_FreeValue(m_jsContext, JS_GetException(m_jsContext));
+	}
+	JS_FreeValue(m_jsContext, v);
+	return ok;
+}
+
+PR_IMPLEMENT(PRBool)
+PREF_EvaluateConfigScript(const char * js_buffer, size_t length,
+	const char* filename, XP_Bool bGlobalContext, XP_Bool bCallbacks)
+{
+	PRBool ok;
+
+	m_CallbacksEnabled = bCallbacks;
+	ok = pref_Evaluate(js_buffer, length, filename, TRUE);
+	m_CallbacksEnabled = TRUE;		/* ?? want to enable after reading user/lock file */
+	return ok;
+}
+
+PR_IMPLEMENT(int)
+PREF_EvaluateJSBuffer(const char * js_buffer, size_t length)
+{
+	return PREF_QuietEvaluateJSBuffer(js_buffer, length);
+}
+
+PR_IMPLEMENT(int)
+PREF_QuietEvaluateJSBuffer(const char * js_buffer, size_t length)
+{
+	if (!m_jsContext)
+		return PREF_NOT_INITIALIZED;
+	return pref_Evaluate(js_buffer, length, NULL, FALSE);
+}
+
+PR_IMPLEMENT(int)
+PREF_QuietEvaluateJSBufferWithGlobalScope(const char * js_buffer, size_t length)
+{
+	return PREF_QuietEvaluateJSBuffer(js_buffer, length);
+}
+#else
 /* This is more recent than the below 3 routines which should be obsoleted */
 PR_IMPLEMENT(JSBool)
 PREF_EvaluateConfigScript(const char * js_buffer, size_t length,
@@ -559,6 +683,8 @@ PREF_QuietEvaluateJSBufferWithGlobalScope(const char * js_buffer, size_t length)
 	/* Hey, this really returns a JSBool */
 	return ok;
 }
+
+#endif /* NS_QUICKJS */
 
 static char * str_escape(const char * original) {
 	const char *p;
@@ -1146,7 +1272,7 @@ PREF_GetBinaryPref(const char *pref_name, void * return_value, int *size)
 	char* buf;
 	int result;
 
-	if (!m_mochaPrefObject || !return_value) return -1;
+	if (!PREF_JS_READY || !return_value) return -1;
 
 	result = PREF_CopyCharPref(pref_name, &buf);
 
@@ -1174,7 +1300,7 @@ ReadCharPrefUsing(const char *pref_name, void** return_value, int *size, CharPre
 	char* buf;
 	int result;
 
-	if (!m_mochaPrefObject || !return_value)
+	if (!PREF_JS_READY || !return_value)
 		return -1;
 	*return_value = NULL;
 
@@ -1597,6 +1723,7 @@ PREF_GetPrefType(const char *pref_name)
 	return PREF_ERROR;
 }
 
+#ifndef NS_QUICKJS
 JSBool PR_CALLBACK pref_NativeDefaultPref
 	(JSContext *cx, JSObject *obj, unsigned int argc, jsval *argv, jsval *rval)
 {
@@ -1700,6 +1827,7 @@ JSBool PR_CALLBACK pref_NativeGetPref
     }
 	return JS_TRUE;
 }
+#endif /* !NS_QUICKJS */
 /* -- */
 
 PR_IMPLEMENT(XP_Bool)
@@ -2014,6 +2142,7 @@ PREF_IsAutoAdminEnabled()
 }
 #endif
 
+#ifndef NS_QUICKJS
 /* Called from JavaScript */
 typedef char* (*ldap_func)(char*, char*, char*, char*, char**); 
 
@@ -2086,6 +2215,7 @@ JSBool PR_CALLBACK pref_NativeGetLDAPAttr
 	*rval = JSVAL_NULL;
 	return JS_TRUE;
 }
+#endif /* !NS_QUICKJS */
 
 /* LI_STUFF ?? add some debugging stuff here. */
 /* Dump debugging info in response to about:config.
@@ -2145,6 +2275,7 @@ PREF_AboutConfig()
 	return pcs.childList;
 }
 
+#ifndef NS_QUICKJS
 #define MAYBE_GC_BRANCH_COUNT_MASK	4095
 
 JSBool PR_CALLBACK
@@ -2218,6 +2349,8 @@ pref_ErrorReporter(JSContext *cx, const char *message,
 		XP_FREE(last);
 	}
 }
+
+#endif /* !NS_QUICKJS */
 
 /* Platform specific alert messages */
 void pref_Alert(char* msg)
@@ -2311,6 +2444,7 @@ pref_LoadAutoAdminLib()
 	getPref		-> pref_NativeGetPref
 	config		-> pref_NativeSetConfig
  */
+#ifndef NS_QUICKJS
 static JSBool pref_HashJSPref(unsigned int argc, jsval *argv, PrefAction action)
 {	
 #ifdef NOPE1987
@@ -2358,5 +2492,222 @@ static JSBool pref_HashJSPref(unsigned int argc, jsval *argv, PrefAction action)
 
 	return JS_TRUE;
 }
+#endif /* !NS_QUICKJS */
 
 
+
+#ifdef NS_QUICKJS
+/*
+ * The preference functions on QuickJS.  pref(name, value) and the others
+ * set a string, integer or boolean preference; getPref(name) reads one.
+ */
+static JSValue
+pref_HashQJSPref(JSContext *cx, int argc, JSValueConst *argv, PrefAction action)
+{
+	PrefValue value;
+	const char *key;
+
+	if (argc < 2 || !JS_IsString(argv[0]))
+		return JS_UNDEFINED;
+	key = JS_ToCString(cx, argv[0]);
+	if (!key)
+		return JS_EXCEPTION;
+	if (JS_IsString(argv[1])) {
+		const char *str = JS_ToCString(cx, argv[1]);
+		if (str) {
+			value.stringVal = (char *) str;
+			pref_HashPref(key, value, PREF_STRING, action);
+			JS_FreeCString(cx, str);
+		}
+	} else if (JS_IsBool(argv[1])) {
+		value.boolVal = JS_ToBool(cx, argv[1]) ? TRUE : FALSE;
+		pref_HashPref(key, value, PREF_BOOL, action);
+	} else if (JS_IsNumber(argv[1])) {
+		int32_t i = 0;
+		JS_ToInt32(cx, &i, argv[1]);
+		value.intVal = i;
+		pref_HashPref(key, value, PREF_INT, action);
+	}
+	JS_FreeCString(cx, key);
+	return JS_UNDEFINED;
+}
+
+static JSValue
+pref_QJSDefaultPref(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	return pref_HashQJSPref(cx, argc, argv, PREF_SETDEFAULT);
+}
+
+static JSValue
+pref_QJSUserPref(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	return pref_HashQJSPref(cx, argc, argv, PREF_SETUSER);
+}
+
+static JSValue
+pref_QJSLockPref(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	return pref_HashQJSPref(cx, argc, argv, PREF_LOCK);
+}
+
+static JSValue
+pref_QJSSetConfig(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	return pref_HashQJSPref(cx, argc, argv, PREF_SETCONFIG);
+}
+
+static JSValue
+pref_QJSLIUserPref(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	pref_HashQJSPref(cx, argc, argv, PREF_SETUSER);
+	return pref_HashQJSPref(cx, argc, argv, PREF_SETLI);
+}
+
+static JSValue
+pref_QJSLIDefPref(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	pref_HashQJSPref(cx, argc, argv, PREF_SETDEFAULT);
+	return pref_HashQJSPref(cx, argc, argv, PREF_SETLI);
+}
+
+/* Change a flag of an existing preference: unlockPref, localPref. */
+static JSValue
+pref_QJSFlag(JSContext *cx, int argc, JSValueConst *argv, uint8 flag, XP_Bool set)
+{
+	const char *key;
+	PrefNode *pref;
+
+	if (argc < 1 || !JS_IsString(argv[0]))
+		return JS_UNDEFINED;
+	key = JS_ToCString(cx, argv[0]);
+	if (!key)
+		return JS_EXCEPTION;
+	pref = (PrefNode *) PR_HashTableLookup(m_HashTable, key);
+	if (pref && ((pref->flags & flag) != 0) != set) {
+		if (set)
+			pref->flags |= flag;
+		else
+			pref->flags &= ~flag;
+		if (m_CallbacksEnabled)
+			pref_DoCallback(key);
+	}
+	JS_FreeCString(cx, key);
+	return JS_UNDEFINED;
+}
+
+static JSValue
+pref_QJSUnlockPref(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	return pref_QJSFlag(cx, argc, argv, PREF_LOCKED, FALSE);
+}
+
+static JSValue
+pref_QJSLILocalPref(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	return pref_QJSFlag(cx, argc, argv, PREF_LILOCAL, TRUE);
+}
+
+static JSValue
+pref_QJSGetPref(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	const char *key;
+	PrefNode *pref;
+	JSValue rv = JS_UNDEFINED;
+
+	if (argc < 1 || !JS_IsString(argv[0]))
+		return JS_UNDEFINED;
+	key = JS_ToCString(cx, argv[0]);
+	if (!key)
+		return JS_EXCEPTION;
+	pref = (PrefNode *) PR_HashTableLookup(m_HashTable, key);
+	if (pref) {
+		XP_Bool use_default = (PREF_IS_LOCKED(pref) || !PREF_HAS_USER_VALUE(pref));
+
+		if (pref->flags & PREF_STRING) {
+			char *str = use_default ? pref->defaultPref.stringVal : pref->userPref.stringVal;
+			rv = JS_NewString(cx, str ? str : "");
+		} else if (pref->flags & PREF_INT) {
+			rv = JS_NewInt32(cx, use_default ? pref->defaultPref.intVal : pref->userPref.intVal);
+		} else if (pref->flags & PREF_BOOL) {
+			rv = JS_NewBool(cx, use_default ? pref->defaultPref.boolVal : pref->userPref.boolVal);
+		}
+	}
+	JS_FreeCString(cx, key);
+	return rv;
+}
+
+/* There is no AutoAdmin library. */
+static JSValue
+pref_QJSGetLDAPAttr(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	return JS_NULL;
+}
+
+static const JSCFunctionListEntry pref_qjs_functions[] = {
+	JS_CFUNC_DEF("pref", 2, pref_QJSDefaultPref),
+	JS_CFUNC_DEF("defaultPref", 2, pref_QJSDefaultPref),
+	JS_CFUNC_DEF("user_pref", 2, pref_QJSUserPref),
+	JS_CFUNC_DEF("lockPref", 2, pref_QJSLockPref),
+	JS_CFUNC_DEF("unlockPref", 1, pref_QJSUnlockPref),
+	JS_CFUNC_DEF("config", 2, pref_QJSSetConfig),
+	JS_CFUNC_DEF("getPref", 1, pref_QJSGetPref),
+	JS_CFUNC_DEF("getLDAPAttributes", 4, pref_QJSGetLDAPAttr),
+	JS_CFUNC_DEF("localPref", 1, pref_QJSLILocalPref),
+	JS_CFUNC_DEF("localUserPref", 2, pref_QJSLIUserPref),
+	JS_CFUNC_DEF("localDefPref", 2, pref_QJSLIDefPref),
+};
+
+extern int pref_InitInitialObjects(void);
+
+/* The runtime, the configuration context with the preference functions as
+ * globals and as methods of PrefConfig, and the default preferences. */
+static PRBool
+pref_InitQuickJS(void)
+{
+	JSValue global, config;
+
+	if (!m_jsRuntime) {
+		m_jsRuntime = JS_NewRuntime();
+		if (!m_jsRuntime)
+			return PR_FALSE;
+	}
+	m_jsContext = JS_NewContext(m_jsRuntime);
+	if (!m_jsContext)
+		return PR_FALSE;
+	global = JS_GetGlobalObject(m_jsContext);
+	JS_SetPropertyFunctionList(m_jsContext, global, pref_qjs_functions,
+							   (int) (sizeof pref_qjs_functions / sizeof pref_qjs_functions[0]));
+	config = JS_NewObject(m_jsContext);
+	JS_SetPropertyFunctionList(m_jsContext, config, pref_qjs_functions,
+							   (int) (sizeof pref_qjs_functions / sizeof pref_qjs_functions[0]));
+	JS_SetPropertyStr(m_jsContext, global, "PrefConfig", config);
+	JS_FreeValue(m_jsContext, global);
+
+#if !defined(XP_WIN) && !defined(XP_OS2)
+	return pref_InitInitialObjects() ? PR_TRUE : PR_FALSE;
+#else
+	return PR_TRUE;
+#endif
+}
+
+/* An error in a preference or configuration file: say where. */
+static void
+pref_ReportException(JSContext *cx, const char *filename)
+{
+	JSValue exc = JS_GetException(cx);
+	const char *msg = JS_ToCString(cx, exc);
+	char *last;
+
+	last = PR_sprintf_append(0, "An error occurred reading the startup configuration file.  "
+		"Please contact your administrator.");
+	last = PR_sprintf_append(last, LINEBREAK LINEBREAK "%s%s%s", filename ? filename : "",
+							 filename ? ": " : "", msg ? msg : "error");
+	if (msg)
+		JS_FreeCString(cx, msg);
+	JS_FreeValue(cx, exc);
+	if (last) {
+		pref_Alert(last);
+		XP_FREE(last);
+	}
+}
+#endif /* NS_QUICKJS */

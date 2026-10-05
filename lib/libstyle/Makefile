@@ -23,11 +23,14 @@ LIBRARY_NAME	= style
 CSRCS		= csslex.c \
 		  csstab.c \
 		  csstojs.c \
-		  jssrules.c \
-		  libstyle.c \
 		  stystack.c \
 		  stystruc.c \
 		  $(NULL)
+
+# JavaScript Style Sheets: the 1998 engine's (not with NS_QUICKJS)
+ifndef NS_QUICKJS
+CSRCS		+= jssrules.c libstyle.c
+endif
 
 # CSS by libcss, NetSurf's CSS engine (nscss.h)
 ifdef NS_LIBCSS
@@ -36,7 +39,7 @@ endif
 
 EXPORTS		= stystack.h stystruc.h css.h
 
-REQUIRES	= js nspr dbm img util layer
+REQUIRES	= nspr dbm img util layer
 
 include $(DEPTH)/config/rules.mk
 

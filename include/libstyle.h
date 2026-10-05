@@ -27,8 +27,10 @@
 
 XP_BEGIN_PROTOS
 
+#ifndef NS_QUICKJS
 extern JSBool
 JSS_ResolveDocName(JSContext *mc, MWContext *context, JSObject *obj, jsval id);
+#endif
 
 XP_END_PROTOS
 

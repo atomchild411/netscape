@@ -22,7 +22,9 @@
 
 #include "prefapi.h"
 #include "prlink.h"
+#ifndef NS_QUICKJS
 #include "jsapi.h"
+#endif
 #include "jsbuffer.h"
 #include "xpassert.h"
 
@@ -41,10 +43,10 @@ static struct fe_icon_type* splash_screen = NULL;
  * Needed by PREF_Init.
  * Sets the default preferences.
  */
-JSBool
+int
 pref_InitInitialObjects(void)
 {
-    JSBool status;
+    int status;
 
     XP_ASSERT(pref_init_buffer);
 

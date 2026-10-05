@@ -30,8 +30,12 @@
 #include "edtplug.h"
 
 /* for Mocha glue */
+#ifdef NS_QUICKJS
+#include "nsjscompat.h"
+#else
 #include "jsapi.h"
 #include "jsjava.h"
+#endif
 
 #if !defined (XP_MAC)
 #include "netscape_plugin_composer_PluginManager.h"

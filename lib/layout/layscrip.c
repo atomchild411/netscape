@@ -1612,6 +1612,78 @@ lo_css_link_exit_fn(URL_Struct *url_struct, int status, MWContext *context)
 }
 #endif /* NS_LIBCSS */
 
+#ifdef NS_QUICKJS
+/*
+ * document.write (lib/libmocha on QuickJS, on this thread): push STR through
+ * the parser and layout now, as the 1998 engine's write event did.  Layout is
+ * usually blocked on the SCRIPT that writes: that blockage is lifted for the
+ * write.  If what is written blocks layout again (a SCRIPT in it), layout
+ * re-blocks on the writing SCRIPT once that is done.  Returns the stream's
+ * status, or -1 when the document has changed or writes nest too deep.
+ */
+int
+LO_QJSDocWrite(MWContext *context, NET_StreamClass *stream, char *str,
+               int32 len, int32 doc_id, XP_Bool self_modifying)
+{
+    lo_TopState *top_state;
+    int32 pre_doc_id = XP_DOCID(context);
+    LO_Element *save_blocking = NULL, *current_script = NULL;
+    Bool bumped_no_newline_count = FALSE;
+    uint save_overflow = 0;
+    int status;
+
+    if ((doc_id && doc_id != pre_doc_id) || pre_doc_id == -1 || !stream)
+        return -1;
+
+    LO_LockLayout();
+    top_state = lo_GetMochaTopState(context);
+    if (top_state) {
+        if (top_state->input_write_level >= MAX_INPUT_WRITE_LEVEL-1) {
+            LO_UnlockLayout();
+            return -1;
+        }
+        top_state->input_write_level++;
+        if (top_state->doc_data) {
+            if (self_modifying) {
+                top_state->doc_data->no_newline_count++;
+                bumped_no_newline_count = TRUE;
+            }
+            save_overflow = top_state->doc_data->overflow_depth;
+            top_state->doc_data->overflow_depth = 0;
+        }
+        current_script = top_state->current_script;
+        save_blocking = top_state->layout_blocking_element;
+        if (save_blocking && save_blocking->type == LO_SCRIPT)
+            top_state->layout_blocking_element = NULL;
+    }
+    LO_UnlockLayout();
+
+    status = (*stream->put_block)(stream, str, len);
+
+    LO_LockLayout();
+    top_state = lo_GetMochaTopState(context);
+    if (top_state) {
+        if (bumped_no_newline_count && top_state->doc_data)
+            top_state->doc_data->no_newline_count--;
+        if (XP_DOCID(context) == pre_doc_id) {
+            if (top_state->doc_data)
+                top_state->doc_data->overflow_depth += save_overflow;
+            if (top_state->layout_blocking_element == NULL) {
+                /* what was written did not block: go on blocking on the
+                 * SCRIPT that wrote it */
+                top_state->layout_blocking_element = save_blocking;
+                top_state->input_write_level--;
+            }
+            else {
+                LO_CreateReblockTag(context, current_script);
+            }
+        }
+    }
+    LO_UnlockLayout();
+    return status;
+}
+#endif /* NS_QUICKJS */
+
 static char script_reblock_tag[]   = "<" PT_NSCP_REBLOCK ">";
 
 /*

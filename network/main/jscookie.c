@@ -22,6 +22,29 @@
    Large chunks of this were stolen from jsmsg.c.
  */
 
+#ifdef NS_QUICKJS
+/*
+ * Cookie filters written in JavaScript (filters.js) belonged to the 1998
+ * engine.  With JavaScript on QuickJS there are none: every cookie gets
+ * the default treatment.
+ */
+#include "mkutils.h"
+#include "jscookie.h"
+
+PUBLIC JSCFResult
+JSCF_Execute(MWContext *mwcontext, const char *script_name,
+             JSCFCookieData *data, Bool *data_changed)
+{
+    *data_changed = FALSE;
+    return JSCF_whatever;
+}
+
+PUBLIC void
+JSCF_Cleanup(void)
+{
+}
+
+#else /* !NS_QUICKJS */
 #include "mkutils.h"
 #include "mkutils.h"
 #include "mkparse.h"
@@ -602,3 +625,5 @@ JSCF_Cleanup(void)
         destroyJSCookieFilterStuff();
 	}
 }
+
+#endif /* !NS_QUICKJS */

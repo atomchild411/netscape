@@ -28,8 +28,12 @@
 #include "prthread.h"
 
 /* for Mocha glue */
+#ifdef NS_QUICKJS
+#include "nsjscompat.h"
+#else
 #include "jsapi.h"
 #include "jsjava.h"
+#endif
 
 XP_BEGIN_PROTOS
 

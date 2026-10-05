@@ -26,7 +26,9 @@
 #include "libmocha.h"
 #include "stystruc.h"
 #include "stystack.h"
+#ifndef NS_QUICKJS
 #include "jsspriv.h"
+#endif
 #ifdef NS_LIBCSS
 #include "nscss.h"
 #endif
@@ -308,8 +310,10 @@ SML_PushTagWithAttrs(StyleAndTagStack *styleStack, char *name, char *class_name,
 	}
 #endif
 
+#ifndef NS_QUICKJS
 	/* add call to style sheet parser here to fill in style struct */
 	jss_GetStyleForTopTag((StyleAndTagStack*)self);
+#endif
 
 	return(PUSH_TAG_SUCCESS);
 }
@@ -556,6 +560,7 @@ SML_SetObjectRefs(StyleAndTagStack *styleStack,
 	self->ids = ids;
 }
 
+#ifndef NS_QUICKJS
 /*
  * Helper routine to assemble the JSSContext
  */
@@ -573,6 +578,8 @@ sml_GetJSSContext(StyleAndTagStack *styleStack, JSSContext *jc)
 	/* Lookup up document.ids */
 	jc->ids = self->ids;
 }
+
+#endif /* !NS_QUICKJS */
 
 #ifdef TEST_STYLESTACK
 

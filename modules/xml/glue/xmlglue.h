@@ -31,7 +31,9 @@
 #endif
 
 #ifdef MOZILLA_CLIENT
+#ifndef NS_QUICKJS
 #include "jscompat.h"
+#endif
 #include "lo_ele.h"
 #include "libevent.h"
 #include "libmocha.h"

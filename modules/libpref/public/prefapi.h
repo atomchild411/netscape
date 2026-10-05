@@ -26,8 +26,12 @@
 #if defined(XP_UNIX) || defined(XP_MAC) || defined(XP_OS2)
 #include "xp_core.h"
 #endif	 
+#ifdef NS_QUICKJS
+#include <quickjs/quickjs.h>
+#else
 #include "jscompat.h"
 #include "jspubtd.h"
+#endif
 
 #ifdef XP_WIN
 #ifndef NSPR20
@@ -80,11 +84,17 @@ PREF_Init(char *filename);
 PR_EXTERN(int)
 PREF_GetConfigContext(JSContext **js_context);
 
+#ifdef NS_QUICKJS
+/* The QuickJS runtime every JavaScript user shares (made by PREF_Init). */
+PR_EXTERN(JSRuntime *)
+PREF_GetJSRuntime(void);
+#else
 PR_EXTERN(int)
 PREF_GetGlobalConfigObject(JSObject **js_object);
 
 PR_EXTERN(int)
 PREF_GetPrefConfigObject(JSObject **js_object);
+#endif
 
 /*
 // Cleanup should be called at program exit to free the 
@@ -139,7 +149,11 @@ PREF_QuietEvaluateJSBufferWithGlobalScope(const char * js_buffer, size_t length)
 // as far as I know.  The following is used from mkautocf to evaluate a 
 // config URL file with callbacks.
 */
+#ifdef NS_QUICKJS
+PR_EXTERN(PRBool)
+#else
 PR_EXTERN(JSBool)
+#endif
 PREF_EvaluateConfigScript(const char * js_buffer, size_t length,
 	const char* filename, XP_Bool bGlobalContext, XP_Bool bCallbacks);
 

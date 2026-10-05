@@ -226,6 +226,7 @@ struct MWContext_ {
 
 #ifdef MOCHA
     struct JSContext *mocha_context;	/* opaque handle to Mocha state */
+    void *mocha_decoder;		/* the window's MochaDecoder (NS_QUICKJS) */
     uint32  event_bit;			/* sum of all event capturing objects */
     XP_Bool js_drag_enabled;		/* indicates JS drag enabled */
     int8 js_dragging;			/* indicates which button has JS drag in process */

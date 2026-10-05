@@ -59,9 +59,11 @@
 
 #include "net.h"
 #include "libmocha.h"
+#ifndef NS_QUICKJS
 #include "jsapi.h"
 #include "jscompat.h"
 #include "jspubtd.h"
+#endif
 
 /* for XP_GetString() */
 #include "xpgetstr.h"
@@ -174,6 +176,11 @@ PRIVATE XP_List*pacf_bad_keywords = NULL;
 
 PRIVATE Bool	pacf_find_proxy_undefined = FALSE;
 
+#ifdef NS_QUICKJS
+/* The proxy auto-config file runs in a QuickJS context of its own, with
+ * the helper functions PAC files expect (pacf_prelude). */
+PRIVATE JSContext *pacContext = NULL;
+#else
 /* Javascript stuff. A javascript context does the interpretation and
  * compilation of the pac file. */
 PRIVATE JSPropertySpec pc_props[] = {
@@ -223,6 +230,7 @@ PRIVATE JSFunctionSpec pc_methods[] = {
     { "shExpMatch",          proxy_regExpMatch,         2},
     { NULL,                  NULL,                      0}
 };
+#endif /* NS_QUICKJS */
 
 PRIVATE char *mkMethodString( int method ) {
   char *mstr= NULL;
@@ -769,6 +777,128 @@ PRIVATE unsigned int pacf_write_ready(NET_StreamClass *stream) {
     return MAX_WRITE_READY;
 }
 
+#ifdef NS_QUICKJS
+/* The helpers a PAC file may call.  dnsResolve and myIpAddress are C
+ * (pacf_qjs_functions); the rest are JavaScript. */
+PRIVATE const char pacf_prelude[] =
+"function isPlainHostName(h) { return String(h).indexOf('.') < 0; }\n"
+"function dnsDomainIs(h, d) { h = String(h); d = String(d);\n"
+"  return h.length >= d.length && h.substring(h.length - d.length) === d; }\n"
+"function localHostOrDomainIs(h, hd) { h = String(h); hd = String(hd);\n"
+"  return h === hd || (h.indexOf('.') < 0 && hd.indexOf(h + '.') === 0); }\n"
+"function dnsDomainLevels(h) { return String(h).split('.').length - 1; }\n"
+"function isResolvable(h) { return dnsResolve(h) !== null; }\n"
+"function pacIp(a) { var p = String(a).split('.');\n"
+"  if (p.length !== 4) return null;\n"
+"  return (((p[0] & 255) << 24) | ((p[1] & 255) << 16) | ((p[2] & 255) << 8) | (p[3] & 255)) >>> 0; }\n"
+"function isInNet(h, pat, mask) {\n"
+"  var a = /^[0-9.]+$/.test(h) ? h : dnsResolve(h), n = a && pacIp(a), m = pacIp(mask);\n"
+"  return n !== null && n !== undefined && m !== null &&\n"
+"    ((n & m) >>> 0) === ((pacIp(pat) & m) >>> 0); }\n"
+"function shExpMatch(s, p) {\n"
+"  var r = String(p).replace(/[.+^${}()|[\\]\\\\]/g, '\\\\$&').replace(/\\*/g, '.*').replace(/\\?/g, '.');\n"
+"  return new RegExp('^' + r + '$').test(String(s)); }\n"
+"var regExpMatch = shExpMatch;\n"
+"var pacDays = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];\n"
+"var pacMonths = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];\n"
+"function pacNow(args) { var gmt = args.length && args[args.length - 1] === 'GMT';\n"
+"  if (gmt) args.pop(); var d = new Date();\n"
+"  return { gmt: gmt, day: gmt ? d.getUTCDay() : d.getDay(), date: gmt ? d.getUTCDate() : d.getDate(),\n"
+"    month: gmt ? d.getUTCMonth() : d.getMonth(), year: gmt ? d.getUTCFullYear() : d.getFullYear(),\n"
+"    mins: gmt ? d.getUTCHours() * 60 + d.getUTCMinutes() : d.getHours() * 60 + d.getMinutes(),\n"
+"    secs: gmt ? d.getUTCSeconds() : d.getSeconds() }; }\n"
+"function pacIn(v, a, b) { return a <= b ? v >= a && v <= b : v >= a || v <= b; }\n"
+"function weekdayRange() { var a = [].slice.call(arguments), n = pacNow(a);\n"
+"  var w1 = pacDays.indexOf(String(a[0]).toUpperCase());\n"
+"  var w2 = a.length > 1 ? pacDays.indexOf(String(a[1]).toUpperCase()) : w1;\n"
+"  return w1 >= 0 && w2 >= 0 && pacIn(n.day, w1, w2); }\n"
+"function dateRange() { var a = [].slice.call(arguments), n = pacNow(a), i, v, f = [], t = [];\n"
+"  function val(x) { var m = pacMonths.indexOf(String(x).toUpperCase());\n"
+"    if (m >= 0) return { k: 'month', v: m };\n"
+"    x = Number(x); return x > 31 ? { k: 'year', v: x } : { k: 'date', v: x }; }\n"
+"  for (i = 0; i < a.length; i++) (i < a.length / 2 || a.length === 1 ? f : t).push(val(a[i]));\n"
+"  if (!t.length) t = f;\n"
+"  function key(set, d) { var o = { year: n.year, month: n.month, date: n.date }, k;\n"
+"    for (k = 0; k < set.length; k++) o[set[k].k] = set[k].v;\n"
+"    return o.year * 10000 + o.month * 100 + o.date; }\n"
+"  var now = n.year * 10000 + n.month * 100 + n.date;\n"
+"  return pacIn(now, key(f), key(t)); }\n"
+"function timeRange() { var a = [].slice.call(arguments), n = pacNow(a), x = a.map(Number);\n"
+"  if (x.length === 1) return Math.floor(n.mins / 60) === x[0];\n"
+"  if (x.length === 2) return pacIn(Math.floor(n.mins / 60), x[0], x[1] - 1);\n"
+"  if (x.length === 4) return pacIn(n.mins, x[0] * 60 + x[1], x[2] * 60 + x[3] - 1);\n"
+"  if (x.length === 6) { var s = n.mins * 60 + n.secs;\n"
+"    return pacIn(s, (x[0] * 60 + x[1]) * 60 + x[2], (x[3] * 60 + x[4]) * 60 + x[5]); }\n"
+"  return false; }\n"
+"var ProxyConfig = globalThis;\n";
+
+PRIVATE char *proxy_dns_resolve(const char *host);
+
+PRIVATE JSValue
+pacf_qjs_dnsResolve(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	const char *host;
+	char *ip;
+	JSValue rv = JS_NULL;
+
+	if (argc < 1 || !JS_IsString(argv[0]))
+		return JS_NULL;
+	host = JS_ToCString(cx, argv[0]);
+	if (!host)
+		return JS_EXCEPTION;
+	ip = proxy_dns_resolve(host);
+	JS_FreeCString(cx, host);
+	if (ip) {
+		rv = JS_NewString(cx, ip);
+		PR_Free(ip);
+	}
+	return rv;
+}
+
+PRIVATE JSValue
+pacf_qjs_myIpAddress(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	static XP_Bool initialized = FALSE;
+	static char *my_address = NULL;
+
+	if (!initialized) {
+		char name[100];
+		initialized = TRUE;
+		if (PR_GetSystemInfo(PR_SI_HOSTNAME, name, sizeof(name)) == PR_SUCCESS)
+			my_address = proxy_dns_resolve(name);
+	}
+	return my_address ? JS_NewString(cx, my_address) : JS_NewString(cx, "127.0.0.1");
+}
+
+PRIVATE const JSCFunctionListEntry pacf_qjs_functions[] = {
+	JS_CFUNC_DEF("dnsResolve", 1, pacf_qjs_dnsResolve),
+	JS_CFUNC_DEF("myIpAddress", 0, pacf_qjs_myIpAddress),
+};
+
+/* A fresh context for each PAC file loaded. */
+PUBLIC XP_Bool
+NET_InitPacfContext(void)
+{
+	JSValue global, v;
+
+	if (pacContext)
+		JS_FreeContext(pacContext);
+	pacContext = NULL;
+	if (!PREF_GetJSRuntime())
+		return FALSE;
+	pacContext = JS_NewContext(PREF_GetJSRuntime());
+	if (!pacContext)
+		return FALSE;
+	global = JS_GetGlobalObject(pacContext);
+	JS_SetPropertyFunctionList(pacContext, global, pacf_qjs_functions,
+		(int) (sizeof pacf_qjs_functions / sizeof pacf_qjs_functions[0]));
+	JS_FreeValue(pacContext, global);
+	v = JS_Eval(pacContext, pacf_prelude, sizeof pacf_prelude - 1, "<pac helpers>",
+				JS_EVAL_TYPE_GLOBAL);
+	JS_FreeValue(pacContext, v);
+	return TRUE;
+}
+#else
 PUBLIC XP_Bool
 NET_InitPacfContext(void)
 {
@@ -810,11 +940,15 @@ NET_InitPacfContext(void)
 	return TRUE;
 }
 
+#endif /* NS_QUICKJS */
+
 PRIVATE void pacf_complete(NET_StreamClass *stream) {
     PACF_Object *obj=stream->data_object;
+#ifndef NS_QUICKJS
 	jsval result;
+#endif
     XP_StatStruct st;
-    JSBool ok;	
+    int ok;	
 
 retry:
     if (!obj->flag || obj->flag == 2) {
@@ -848,9 +982,30 @@ retry:
 	goto out;
     }
 
+#ifdef NS_QUICKJS
+	{
+		/* QuickJS wants the text NUL-terminated */
+		char *src = PR_Malloc(pacf_src_len + 1);
+		JSValue v;
+
+		ok = FALSE;
+		if (src && pacContext) {
+			memcpy(src, pacf_src_buf, pacf_src_len);
+			src[pacf_src_len] = '\0';
+			v = JS_Eval(pacContext, src, pacf_src_len, pacf_url ? pacf_url : "<pac>",
+						JS_EVAL_TYPE_GLOBAL);
+			ok = !JS_IsException(v);
+			if (!ok)
+				JS_FreeValue(pacContext, JS_GetException(pacContext));
+			JS_FreeValue(pacContext, v);
+		}
+		PR_FREEIF(src);
+	}
+#else
 		ok = JS_EvaluateScript(configContext, proxyConfig, 
 			   pacf_src_buf, pacf_src_len, pacf_url, 0,
 			   &result);
+#endif
 
     if (!ok) {
 		/* Something went wrong with the js evaluation. If we're using a
@@ -1091,7 +1246,9 @@ PUBLIC char * NET_GetProxyConfigSource(void) {
 MODULE_PRIVATE char *pacf_find_proxies_for_url(MWContext *context, 
 											   URL_Struct *URL_s ) {
 #ifdef MOCHA
+#ifndef NS_QUICKJS
     jsval rv;
+#endif
     char *buf = NULL;
     char *host = NULL;
     char *p, *q, *r;
@@ -1101,7 +1258,9 @@ MODULE_PRIVATE char *pacf_find_proxies_for_url(MWContext *context,
     char *method = NULL;
     char *bad_url = NULL;
     char *result = NULL;
+#ifndef NS_QUICKJS
     JSBool ok;
+#endif
 
 	if(!URL_s)
 		return NULL;
@@ -1184,6 +1343,54 @@ MODULE_PRIVATE char *pacf_find_proxies_for_url(MWContext *context,
 	    *p = '\0';
     }
 
+#ifdef NS_QUICKJS
+	{
+		/* FindProxyForURL(url, host): the admin configuration's, or the
+		 * PAC file's */
+		JSContext *cx = NULL;
+		JSValue global, fn, args[3], v;
+
+		if (NET_FindProxyInJSC()) {
+			JSValue pc;
+			PREF_GetConfigContext(&cx);
+			if (!cx)
+				goto out;
+			global = JS_GetGlobalObject(cx);
+			pc = JS_GetPropertyStr(cx, global, "ProxyConfig");
+			fn = JS_GetPropertyStr(cx, pc, "FindProxyForURL");
+			JS_FreeValue(cx, pc);
+		} else {
+			cx = pacContext;
+			if (!cx)
+				goto out;
+			global = JS_GetGlobalObject(cx);
+			fn = JS_GetPropertyStr(cx, global, "FindProxyForURL");
+		}
+		if (JS_IsFunction(cx, fn)) {
+			args[0] = JS_NewString(cx, bad_url);
+			args[1] = JS_NewString(cx, host);
+			args[2] = JS_NewString(cx, method ? method : "");
+			v = JS_Call(cx, fn, global, 3, args);
+			if (JS_IsString(v)) {
+				const char *name = JS_ToCString(cx, v);
+				if (name && *name)
+					result = PL_strdup(name);
+				if (name)
+					JS_FreeCString(cx, name);
+			} else if (JS_IsException(v)) {
+				JS_FreeValue(cx, JS_GetException(cx));
+			}
+			JS_FreeValue(cx, v);
+			JS_FreeValue(cx, args[0]);
+			JS_FreeValue(cx, args[1]);
+			JS_FreeValue(cx, args[2]);
+		} else {
+			pacf_find_proxy_undefined = TRUE;
+		}
+		JS_FreeValue(cx, fn);
+		JS_FreeValue(cx, global);
+	}
+#else
 	if ( NET_FindProxyInJSC() ) {
 	    XP_SPRINTF(buf, "ProxyConfig.FindProxyForURL(\"%s\",\"%s\",\"%s\")", safe_url, host,
 	       method ? method : "" );
@@ -1213,6 +1420,7 @@ MODULE_PRIVATE char *pacf_find_proxies_for_url(MWContext *context,
     }
 
     JS_RemoveRoot(configContext, &rv);
+#endif /* NS_QUICKJS */
 out:
     FREEIF(method);
     FREEIF(buf);
@@ -1275,6 +1483,7 @@ out:
  * (is a plain hostname, not an FQDN).
  *
  * Just a string operation, doesn't consult DNS. */
+#ifndef NS_QUICKJS
 MODULE_PRIVATE JSBool PR_CALLBACK
 proxy_isPlainHostName(JSContext *mc, JSObject *obj, unsigned int argc, 
 					  jsval *argv, jsval *rval) {
@@ -1417,6 +1626,7 @@ proxy_isResolvable(JSContext *mc, JSObject *obj, unsigned int argc,
  * Maintains a private cache for the last resolved address (so this
  * function can be called multiple times with the same host argument
  * without doing actual DNS queries every time). */
+#endif /* !NS_QUICKJS */
 PRIVATE char *proxy_dns_resolve(const char *host) {
     static char *cache_host = NULL;
     static char *cache_ip = NULL;
@@ -1485,6 +1695,7 @@ PRIVATE char *proxy_dns_resolve(const char *host) {
     return NULL;
 }
 
+#ifndef NS_QUICKJS
 MODULE_PRIVATE JSBool PR_CALLBACK
 proxy_dnsResolve(JSContext *mc, JSObject *obj, unsigned int argc, 
 				 jsval *argv, jsval *rval) {
@@ -1786,5 +1997,6 @@ proxy_timeRange(JSContext *mc, JSObject *obj, unsigned int argc,
 	*rval = (secondsA <= secondsB && secondsB < secondsC) ? JSVAL_TRUE : JSVAL_FALSE;
 	return JS_TRUE;
 }
+#endif /* !NS_QUICKJS: the 1998 engine's PAC helpers */
 
 #endif /* MOCHA */

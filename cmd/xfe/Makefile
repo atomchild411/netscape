@@ -447,7 +447,11 @@ endif  # JAVA_OR_OJI
 BASIC_LIBS	+= $(DIST)/lib/libzlib.a
 
 ifndef NO_MOCHA
+ifdef NS_QUICKJS
+BASIC_LIBS	+= $(DIST)/lib/libmocha.a
+else
 BASIC_LIBS	+= $(DIST)/lib/libjs.a $(DIST)/lib/libjsj.a $(DIST)/lib/libmocha.a
+endif
 endif
 
 # Post-Java libs
@@ -689,6 +693,9 @@ endif
 ifdef NS_LIBCSS
 OTHER_LIBS	:= -Wl,-Bstatic -lcss -lparserutils -lwapcaplet -Wl,-Bdynamic $(OTHER_LIBS)
 endif
+ifdef NS_QUICKJS
+OTHER_LIBS	:= -Wl,-Bstatic -lquickjs -Wl,-Bdynamic $(OTHER_LIBS)
+endif
 else
 # pkgsrc's Motif and X libraries: SGI's libSgm extends IRIX's own Motif only.
 OTHER_LIBS	= -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm -lpthread $(OS_LIBS)
@@ -697,6 +704,9 @@ OTHER_LIBS	:= -lssl -lcrypto $(OTHER_LIBS)
 endif
 ifdef NS_LIBCSS
 OTHER_LIBS	:= -lcss -lparserutils -lwapcaplet $(OTHER_LIBS)
+endif
+ifdef NS_QUICKJS
+OTHER_LIBS	:= -lquickjs -ldl $(OTHER_LIBS)
 endif
 endif
 else

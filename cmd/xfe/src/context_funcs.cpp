@@ -23,7 +23,9 @@
 
 #include "il_types.h"
 #include "layers.h"
+#ifndef NS_QUICKJS
 #include "jsapi.h"
+#endif
 #include "prefapi.h"
 #include "MozillaApp.h"
 #include "Frame.h"
@@ -1719,8 +1721,12 @@ fe_IsPageLoaded (MWContext *context)
   if (NET_AreThereActiveConnectionsForWindow(context))
     return FALSE;
   
+#ifndef NS_QUICKJS
+  /* (with NS_QUICKJS scripts run to the end on this thread: none is
+   * running between events) */
   if (context->mocha_context && JS_IsRunning(context->mocha_context))
     return FALSE;
+#endif
   
   while ((child = (MWContext*)XP_ListGetObjectNum (context->grid_children,
 						   i++)))

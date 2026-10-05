@@ -88,8 +88,10 @@
 #ifdef MOZILLA_CLIENT
 #include "secnav.h"
 #include "libevent.h"
+#ifndef NS_QUICKJS
 #include "jscompat.h"
 #include "jspubtd.h"
+#endif
 #endif
 
 /* nglayout should render the prefered image load hack obsolete */

@@ -29,6 +29,14 @@ ifdef MOZ_SECURITY
 REQUIRES       += jar
 endif
 
+ifdef NS_QUICKJS
+# JavaScript on QuickJS (qjs.h): the 1998 engine's files are not built.
+REQUIRES	= lay parse img style layer dbm nspr htmldlgs util pref netcache \
+		  network httpurl
+CSRCS		= qjs_core.c \
+		  qjs_window.c \
+		  $(NULL)
+else
 CSRCS		= et_mocha.c \
 		  et_moz.c \
 		  lm_applt.c \
@@ -56,6 +64,7 @@ CSRCS		= et_mocha.c \
 		  lm_win.c \
 		  lm_layer.c \
 		  $(NULL)
+endif
 
 
 ifdef MOZ_JAVA

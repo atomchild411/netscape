@@ -28,7 +28,11 @@
 #include "prtypes.h"
 #include "plhash.h"
 #include "prthread.h"
+#ifdef NS_QUICKJS
+#include "nsjscompat.h"
+#else
 #include "jsapi.h"
+#endif
 
 /* enable JavaScript Debugger support */
 #if defined (_WIN32) || defined(XP_UNIX) || defined(powerc) || defined(__powerc) || defined(XP_OS2)

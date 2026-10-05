@@ -27,7 +27,9 @@
 #include "pa_parse.h"
 #include "libevent.h"
 #ifdef JAVA
+#ifndef NS_QUICKJS
 #include "jsjava.h"
+#endif
 #endif
 #include "layers.h"
 
