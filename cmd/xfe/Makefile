@@ -224,7 +224,11 @@ endif
 XFE2_DIR	= src
 XFE2_LIB	= $(DIST)/lib/lib$(LITE_PREFIX)xfe2.a
 
-ifndef DISABLE_MARINER
+# Mariner, the reflow in place on resize, was unfinished in 1998: on a
+# resize it can call itself through the expose events until the browser
+# stops answering.  Resizing reloads the page from the cache instead, as in
+# Netscape 4.  ENABLE_MARINER=1 turns it back on.
+ifdef ENABLE_MARINER
 CFLAGS		+= -DENABLE_MARINER
 endif
 

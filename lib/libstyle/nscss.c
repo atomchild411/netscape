@@ -107,7 +107,8 @@ struct NSCSS_Doc {
 	css_select_ctx	*ua_ctx;	/* user agent sheet only */
 	css_stylesheet	*ua_sheet;
 	css_stylesheet **sheets;	/* the page's, to destroy */
-	int32			 n_sheets;
+	uint32			*sheet_hashes;	/* of their URL and text: a resize */
+	int32			 n_sheets;		/* reload adds them again */
 	css_unit_ctx	 unit;
 	css_media		 media;
 };
@@ -768,6 +769,7 @@ NSCSS_DestroyDoc(NSCSS_Doc *doc)
 	for (i = 0; i < doc->n_sheets; i++)
 		css_stylesheet_destroy(doc->sheets[i]);
 	XP_FREEIF(doc->sheets);
+	XP_FREEIF(doc->sheet_hashes);
 	if (doc->ua_sheet)
 		css_stylesheet_destroy(doc->ua_sheet);
 	XP_FREE(doc);
@@ -792,19 +794,38 @@ NSCSS_AddSheet(NSCSS_Doc *doc, const char *url, const char *charset,
 			   const char *media, const char *data, int32 len)
 {
 	css_stylesheet *s, **a;
+	uint32 h = 2166136261u, *ha;
+	const char *p;
+	int32 i;
 
 	if (!doc || !data)
 		return;
+	/* FNV-1a over URL, media and text: the same sheet once */
+	for (p = url ? url : ""; *p; p++)
+		h = (h ^ (unsigned char) *p) * 16777619u;
+	for (p = media ? media : ""; *p; p++)
+		h = (h ^ (unsigned char) *p) * 16777619u;
+	for (i = 0; i < len; i++)
+		h = (h ^ (unsigned char) data[i]) * 16777619u;
+	for (i = 0; i < doc->n_sheets; i++)
+		if (doc->sheet_hashes[i] == h)
+			return;
 	s = nscss_parse(url, charset, FALSE, data, len);
 	if (!s)
 		return;
 	a = (css_stylesheet **) XP_REALLOC(doc->sheets,
 									   (doc->n_sheets + 1) * sizeof *a);
-	if (!a) {
+	ha = (uint32 *) XP_REALLOC(doc->sheet_hashes,
+							   (doc->n_sheets + 1) * sizeof *ha);
+	if (a)
+		doc->sheets = a;
+	if (ha)
+		doc->sheet_hashes = ha;
+	if (!a || !ha) {
 		css_stylesheet_destroy(s);
 		return;
 	}
-	doc->sheets = a;
+	doc->sheet_hashes[doc->n_sheets] = h;
 	doc->sheets[doc->n_sheets++] = s;
 	css_select_ctx_append_sheet(doc->ctx, s, CSS_ORIGIN_AUTHOR,
 								media && *media ? media : NULL);
