@@ -17,6 +17,13 @@
 #ifndef _SECSTUBS_H_
 #define _SECSTUBS_H_
 
+#ifdef NS_OPENSSL
+/* OpenSSL (linked in for TLS) has MD5_Update and SHA1_Update with other
+ * arguments: these (implemented in navstubs.c) go by other names. */
+#define MD5_Update	NS_MD5_Update
+#define SHA1_Update	NS_SHA1_Update
+#endif
+
 SEC_BEGIN_PROTOS
 
 CERTCertificate *

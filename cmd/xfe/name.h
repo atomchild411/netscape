@@ -23,7 +23,12 @@
 
 #define XFE_NAME      Netscape
 #define XFE_PROGNAME  netscape
+/* The X class (app-defaults file and resources); a build may choose its
+   own (config.mk: NS_PROGCLASS), so as not to read an installed Netscape
+   4's resources. */
+#ifndef XFE_PROGCLASS
 #define XFE_PROGCLASS Netscape
+#endif
 #define XFE_LEGALESE "(c) 1995-1998 Netscape Communications Corp."
 
 /* I don't pretend to understand this. */

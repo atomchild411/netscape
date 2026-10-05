@@ -518,6 +518,150 @@ SOB_verified_extract(ZIG *zig, char *path, char *outpath)
     return(-1);
 }
 
+#ifdef NS_OPENSSL
+/*
+** MD5 and SHA-1 with NSS's interface, from OpenSSL (the stubs below return
+** nothing).  secstubs.h renames MD5_Update and SHA1_Update: OpenSSL has
+** functions of those names with other arguments.
+*/
+#include <string.h>
+#include "prmem.h"
+#include <openssl/evp.h>
+
+struct _md5context { EVP_MD_CTX *ctx; };
+struct _sha1context { EVP_MD_CTX *ctx; };
+
+static EVP_MD_CTX *
+ns_hash_new(const EVP_MD *md)
+{
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+
+    if (ctx && !EVP_DigestInit_ex(ctx, md, NULL)) {
+        EVP_MD_CTX_free(ctx);
+        ctx = NULL;
+    }
+    return ctx;
+}
+
+static void
+ns_hash_end(EVP_MD_CTX *ctx, unsigned char *digest, unsigned int *digestLen,
+            unsigned int maxDigestLen)
+{
+    unsigned char buf[EVP_MAX_MD_SIZE];
+    unsigned int len = 0;
+
+    if (ctx && EVP_DigestFinal_ex(ctx, buf, &len) && len <= maxDigestLen)
+        memcpy(digest, buf, len);
+    else
+        len = 0;
+    if (digestLen)
+        *digestLen = len;
+}
+
+SECStatus
+MD5_HashBuf(unsigned char *dest, const unsigned char *src, uint32 src_length)
+{
+    return EVP_Digest(src, src_length, dest, NULL, EVP_md5(), NULL)
+        ? SECSuccess : SECFailure;
+}
+
+MD5Context *
+MD5_NewContext(void)
+{
+    MD5Context *cx = PR_NEWZAP(MD5Context);
+
+    if (cx && !(cx->ctx = ns_hash_new(EVP_md5()))) {
+        PR_Free(cx);
+        cx = NULL;
+    }
+    return cx;
+}
+
+void
+MD5_DestroyContext(MD5Context *cx, PRBool freeit)
+{
+    if (!cx)
+        return;
+    EVP_MD_CTX_free(cx->ctx);
+    cx->ctx = NULL;
+    if (freeit)
+        PR_Free(cx);
+}
+
+void
+MD5_Begin(MD5Context *cx)
+{
+    if (cx && cx->ctx)
+        EVP_DigestInit_ex(cx->ctx, EVP_md5(), NULL);
+}
+
+void
+MD5_Update(MD5Context *cx, const unsigned char *input, unsigned int inputLen)
+{
+    if (cx && cx->ctx)
+        EVP_DigestUpdate(cx->ctx, input, inputLen);
+}
+
+void
+MD5_End(MD5Context *cx, unsigned char *digest,
+        unsigned int *digestLen, unsigned int maxDigestLen)
+{
+    ns_hash_end(cx ? cx->ctx : NULL, digest, digestLen, maxDigestLen);
+}
+
+SECStatus
+SHA1_HashBuf(unsigned char *dest, const unsigned char *src, uint32 src_length)
+{
+    return EVP_Digest(src, src_length, dest, NULL, EVP_sha1(), NULL)
+        ? SECSuccess : SECFailure;
+}
+
+SHA1Context *
+SHA1_NewContext(void)
+{
+    SHA1Context *cx = PR_NEWZAP(SHA1Context);
+
+    if (cx && !(cx->ctx = ns_hash_new(EVP_sha1()))) {
+        PR_Free(cx);
+        cx = NULL;
+    }
+    return cx;
+}
+
+void
+SHA1_DestroyContext(SHA1Context *cx, PRBool freeit)
+{
+    if (!cx)
+        return;
+    EVP_MD_CTX_free(cx->ctx);
+    cx->ctx = NULL;
+    if (freeit)
+        PR_Free(cx);
+}
+
+void
+SHA1_Begin(SHA1Context *cx)
+{
+    if (cx && cx->ctx)
+        EVP_DigestInit_ex(cx->ctx, EVP_sha1(), NULL);
+}
+
+void
+SHA1_Update(SHA1Context *cx, const unsigned char *input, unsigned int inputLen)
+{
+    if (cx && cx->ctx)
+        EVP_DigestUpdate(cx->ctx, input, inputLen);
+}
+
+void
+SHA1_End(SHA1Context *cx, unsigned char *digest,
+         unsigned int *digestLen, unsigned int maxDigestLen)
+{
+    ns_hash_end(cx ? cx->ctx : NULL, digest, digestLen, maxDigestLen);
+}
+
+#else /* !NS_OPENSSL */
+
 /*
 ** Hash a non-null terminated string "src" into "dest" using MD5
 */
@@ -649,6 +793,8 @@ SHA1_End(SHA1Context *cx, unsigned char *digest,
 {
     return;
 }
+
+#endif /* !NS_OPENSSL */
 
 /*
 ** Return a malloc'd ascii string which is the base64 encoded

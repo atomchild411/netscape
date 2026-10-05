@@ -455,9 +455,17 @@ ifdef NO_SECURITY
 DEFINES		+= -DNO_SECURITY
 endif
 
+# The X class of the program (cmd/xfe/name.h), when not Netscape.
+ifdef NS_PROGCLASS
+DEFINES		+= -DXFE_PROGCLASS=$(NS_PROGCLASS)
+endif
+
 # TLS for netlib from OpenSSL (network/main/mktls.c).
 ifdef NS_OPENSSL
 DEFINES		+= -DNS_OPENSSL
+ifdef NS_CA_FILE
+DEFINES		+= -DNS_CA_FILE=\"$(NS_CA_FILE)\"
+endif
 endif
 
 # Crash-reporting system

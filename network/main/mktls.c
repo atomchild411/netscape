@@ -9,6 +9,8 @@
  * Certificates are checked against OpenSSL's default store (on IRIX,
  * pkgsrc's /opt/pkgsrc/etc/openssl/certs from mozilla-rootcerts-openssl;
  * SSL_CERT_FILE and SSL_CERT_DIR override it), with the server's name.
+ * A build that carries its own roots (the IRIX tardist, with OpenSSL linked
+ * in) names them with -DNS_CA_FILE="path": they are trusted as well.
  */
 
 #include "mkutils.h"
@@ -212,11 +214,21 @@ net_tls_init(char **error_msg)
 	}
 	SSL_CTX_set_min_proto_version(net_tls_ctx, TLS1_2_VERSION);
 	SSL_CTX_set_verify(net_tls_ctx, SSL_VERIFY_PEER, NULL);
-	if (!SSL_CTX_set_default_verify_paths(net_tls_ctx)) {
-		*error_msg = net_tls_error_text("Cannot load trusted certificates", 0);
-		SSL_CTX_free(net_tls_ctx);
-		net_tls_ctx = NULL;
-		return FALSE;
+	{
+		XP_Bool have_roots = SSL_CTX_set_default_verify_paths(net_tls_ctx);
+#ifdef NS_CA_FILE
+		if (SSL_CTX_load_verify_locations(net_tls_ctx, NS_CA_FILE, NULL))
+			have_roots = TRUE;
+		else
+			net_tls_log("cannot load %s", NS_CA_FILE);
+#endif
+		ERR_clear_error();
+		if (!have_roots) {
+			*error_msg = PL_strdup("Cannot load trusted certificates.");
+			SSL_CTX_free(net_tls_ctx);
+			net_tls_ctx = NULL;
+			return FALSE;
+		}
 	}
 	/* Partial writes are fine: netlib writes what it is told it wrote. */
 	SSL_CTX_set_mode(net_tls_ctx, SSL_MODE_ENABLE_PARTIAL_WRITE

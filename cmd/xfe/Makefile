@@ -674,10 +674,20 @@ ifeq ($(OS_ARCH),IRIX)
 # the setting of some resources (e.g. "useEnhancedFSB")
 #
 ifdef NS_USE_GCC
+ifdef NS_IRIX_MOTIF
+# IRIX's own Motif 1.2 (SGI look, with libSgm) and X, as SGI's Netscape 4
+# linked them; everything else is linked in, so the program needs only
+# IRIX itself.
+OTHER_LIBS	= -lSgm -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm -lpthread $(OS_LIBS)
+ifdef NS_OPENSSL
+OTHER_LIBS	:= -Wl,-Bstatic -lssl -lcrypto -Wl,-Bdynamic $(OTHER_LIBS)
+endif
+else
 # pkgsrc's Motif and X libraries: SGI's libSgm extends IRIX's own Motif only.
 OTHER_LIBS	= -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm -lpthread $(OS_LIBS)
 ifdef NS_OPENSSL
 OTHER_LIBS	:= -lssl -lcrypto $(OTHER_LIBS)
+endif
 endif
 else
 OTHER_LIBS	= -lSgm $(MOTIFPATCH_LIB) -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm $(OS_LIBS)
@@ -983,7 +993,7 @@ e_kit_resources.h: e_kit.ad
 	@echo ';' >> $@
 
 $(OBJDIR)/Netscape-nis-export.ad $(OBJDIR)/Netscape-export.ad: Makefile resources versionn.h strs make-resources $(LOCALE_MAP)
-	@./make-resources $@ Netscape Netscape "" export $(LOCALES)
+	@./make-resources $@ Netscape $(if $(NS_PROGCLASS),$(NS_PROGCLASS),Netscape) "" export $(LOCALES)
 
 #######################################################################
 # The "-export" targets
