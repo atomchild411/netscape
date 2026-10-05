@@ -6056,6 +6056,25 @@ lo_percent_width_cells(lo_TableRec *table, lo_cell_data XP_HUGE *cell_array,
 	*min_base_table_width = new_min_base_table_width;
 }
 
+/* NS_TABLE_TRACE=/file: column widths and cell relayouts of each table
+ * as lo_EndTable lays it out, and what reflow does with the cells'
+ * contents (debugging). */
+FILE *
+lo_TableTrace(void)
+{
+	static int opened;
+	static FILE *f;
+
+	if (!opened) {
+		char *p = getenv("NS_TABLE_TRACE");
+
+		opened = 1;
+		if (p && *p)
+			f = fopen(p, "a");
+	}
+	return f;
+}
+
 static void
 lo_cell_relayout_pass(MWContext *context, lo_DocState *state,
 	lo_TableRec *table, lo_cell_data XP_HUGE *cell_array, lo_TableCell *blank_cell,
@@ -6171,6 +6190,11 @@ lo_cell_relayout_pass(MWContext *context, lo_DocState *state,
 					}
 					cell_ptr->cell = cell_struct;
 					cell_ptr->baseline = lo_GetCellBaseline(cell_struct);
+					if (lo_TableTrace())
+						fprintf(lo_TableTrace(),
+							"  relayout %p r%ld c%ld w=%ld -> h=%ld base=%ld\n",
+							(void *)table, (long)y, (long)x, (long)inside_width,
+							(long)cell_struct->height, (long)cell_ptr->baseline);
 					
 					if (cell_ptr->rowspan == 1)
 					{
@@ -6921,6 +6945,22 @@ fprintf(stderr, "lo_EndTable called\n");
 
 	rowspan_pass = FALSE;
 
+	if (lo_TableTrace())
+	{
+		FILE *f = lo_TableTrace();
+		lo_table_span *sp;
+
+		fprintf(f, "EndTable %p %ldx%ld top=%d in_cell_relayout=%d relayout=%d pass=%d limit=%ld cols:",
+			(void *)table, (long)table->rows, (long)table->cols,
+			state->top_state->doc_state == state,
+			(int)state->top_state->in_cell_relayout, (int)relayout,
+			(int)relayout_pass, (long)width_limit);
+		for (sp = table->width_spans; sp; sp = sp->next)
+			fprintf(f, " %ld/%ld", (long)sp->dim, (long)sp->min_dim);
+		fprintf(f, "\n");
+		fflush(f);
+	}
+
 	if ((state->top_state->doc_state == state) ||
 		(state->top_state->in_cell_relayout == TRUE))
 	{
@@ -6946,6 +6986,16 @@ fprintf(stderr, "lo_EndTable called\n");
 		{
 			state->top_state->in_cell_relayout = FALSE;
 		}
+	}
+
+	if (lo_TableTrace())
+	{
+		lo_table_span *sp;
+
+		fprintf(lo_TableTrace(), "  rows %p:", (void *)table);
+		for (sp = table->height_spans; sp; sp = sp->next)
+			fprintf(lo_TableTrace(), " %ld/%ld", (long)sp->dim, (long)sp->min_dim);
+		fprintf(lo_TableTrace(), "\n");
 	}
 
 	table_width = 0;

@@ -27,6 +27,8 @@
 #include "laystyle.h"
 #include "laytrav.h"
 
+
+
 /*
  * Turn this define on to get the new multibyte parsing code
 #define	FAST_MULTI
@@ -4904,6 +4906,29 @@ void lo_RelayoutTextElements ( MWContext * context,
 
 	block->startTextElement = NULL;
 	block->endTextElement = NULL;
+
+	/*
+	 * Multibyte text (UTF-8...) is laid out afresh: reusing its old
+	 * elements skipped what laying them out keeps (the cell's narrowest
+	 * width, the line's end), so a table cell measured as empty and its
+	 * rows overprinted each other.
+	 */
+	if ( block->text_attr != NULL &&
+		 INTL_CharSetType ( block->text_attr->charset ) != SINGLEBYTE )
+		{
+		element = startElement;
+		while ( element != NULL )
+			{
+			next = lo_tv_GetNextLayoutElement ( state, element, FALSE );
+			element->lo_any.prev = NULL;
+			element->lo_any.next = NULL;
+			lo_RecycleElements( context, state, element );
+			if ( element == endElement )
+				break;
+			element = next;
+			}
+		return;
+		}
 	
 	if ( fromElement == NULL )
       fromElement = (LO_TextStruct *)lo_tv_GetNextLayoutElement ( state, (LO_Element*)block, FALSE );
@@ -4997,6 +5022,13 @@ void lo_RelayoutTextElements ( MWContext * context,
              * change).  
              */
             lineWidth = state->right_margin - state->x;
+            if (lo_TableTrace())
+              fprintf(lo_TableTrace(), "      text %p '%.*s' doc_width=%ld line=%ld read=%ld\n",
+                (void *)element, (int)(element->lo_text.text_len > 20 ? 20 : element->lo_text.text_len),
+                (char *)element->lo_text.text, (long)element->lo_text.doc_width,
+                (long)lineWidth, (long)block->buffer_read_index);
+            if (lo_TableTrace())
+              fflush(lo_TableTrace());
             
             if ( fastPreformat || ( element->lo_text.doc_width == lineWidth ) )
               {
@@ -5039,6 +5071,14 @@ void lo_RelayoutTextElements ( MWContext * context,
 
 LO_Element * lo_RelayoutTextBlock ( MWContext * context, lo_DocState * state, LO_TextBlock * block, LO_TextStruct * fromElement )
 {
+	if (lo_TableTrace())
+		fprintf(lo_TableTrace(), "    textblock %p '%.20s' x=%ld y=%ld right=%ld from=%p start=%p break=%d\n",
+			(void *)block, (char *)block->text_buffer, (long)state->x, (long)state->y,
+			(long)state->right_margin, (void *)fromElement, (void *)block->startTextElement,
+			(int)lo_UseBreakTable(block));
+	if (lo_TableTrace())
+		fflush(lo_TableTrace());
+
 	LO_Element *	next;
 	LO_Element *	endElement;
 	LO_Element *	lo_ele;
@@ -5240,6 +5280,12 @@ LO_Element * lo_RelayoutTextBlock ( MWContext * context, lo_DocState * state, LO
 	 * following text block that continues this same text buffer.  
      */
 	lo_FlushLineBuffer(context, state);
+	if (lo_TableTrace())
+	{
+		fprintf(lo_TableTrace(), "    textblock done x=%ld y=%ld max_width=%ld min_width=%ld\n",
+			(long)state->x, (long)state->y, (long)state->max_width, (long)state->min_width);
+		fflush(lo_TableTrace());
+	}
 		
 	return next;
 }

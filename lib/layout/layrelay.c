@@ -690,6 +690,17 @@ static void lo_rl_FitLayoutElements( lo_RelayoutState *relay_state, LO_Element *
 			return;
 		}
 		
+		if (lo_TableTrace()) {
+			FILE *f = lo_TableTrace();
+
+			fprintf(f, "      fit type=%d %p", (int)lo_ele->type, (void *)lo_ele);
+			if (lo_ele->type == LO_TEXT && lo_ele->lo_text.text)
+				fprintf(f, " '%.*s' w=%ld",
+					(int)(lo_ele->lo_text.text_len > 20 ? 20 : lo_ele->lo_text.text_len),
+					(char *)lo_ele->lo_text.text, (long)lo_ele->lo_text.width);
+			fprintf(f, "\n");
+			fflush(f);
+		}
 		/* Dispatch the layout element to its fitting routine. 
 		   Fitting routine returns the next layout element to process */
 		lo_ele = (*lo_rl_FitFunctionTable[lo_ele->type])(relay_state, lo_ele);

@@ -905,6 +905,7 @@ extern void lo_InsertWordBreak(MWContext *, lo_DocState *);
 extern void lo_FormatText(MWContext *, lo_DocState *, char *);
 extern void lo_PreformatedText(MWContext *, lo_DocState *, char *);
 extern LO_Element * lo_RelayoutTextBlock ( MWContext * context, lo_DocState * state, LO_TextBlock * block, LO_TextStruct * fromElement );
+extern FILE *lo_TableTrace(void);	/* NS_TABLE_TRACE, laytable.c */
 extern Bool lo_ChangeText ( LO_TextBlock * block, char * text );
 extern void lo_FlushLineBuffer(MWContext *, lo_DocState *);
 extern void lo_FlushTextBlock ( MWContext *context, lo_DocState *state );
