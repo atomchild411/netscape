@@ -475,6 +475,11 @@ ifdef NS_QUICKJS
 DEFINES		+= -DNS_QUICKJS
 endif
 
+# WebP images by libwebp (modules/libimg/src/ibuf.cpp)
+ifdef NS_WEBP
+DEFINES		+= -DNS_WEBP
+endif
+
 ifdef NS_OPENSSL
 DEFINES		+= -DNS_OPENSSL
 ifdef NS_CA_FILE

@@ -708,6 +708,9 @@ endif
 ifdef NS_QUICKJS
 OTHER_LIBS	:= -lquickjs -ldom -lhubbub -lparserutils -lwapcaplet -ldl $(OTHER_LIBS)
 endif
+ifdef NS_WEBP
+OTHER_LIBS	:= -lwebp $(OTHER_LIBS)
+endif
 endif
 else
 OTHER_LIBS	= -lSgm $(MOTIFPATCH_LIB) -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm $(OS_LIBS)
