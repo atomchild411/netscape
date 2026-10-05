@@ -33,6 +33,9 @@
 
 #include "mkgeturl.h"
 #include "httpurl.h"
+#ifdef NS_OPENSSL
+#include "mktls.h"
+#endif
 #include "shist.h"
 #include "glhist.h"
 #include "mkparse.h"
@@ -121,6 +124,7 @@ typedef enum {
   HTTP_START_CONNECT,
   HTTP_FINISH_CONNECT,
   HTTP_SEND_PROXY_TUNNEL_REQUEST,
+  HTTP_TLS_HANDSHAKE,
   HTTP_BEGIN_UPLOAD_FILE,
   HTTP_SEND_REQUEST,
   HTTP_SEND_POST_DATA,
@@ -204,8 +208,12 @@ typedef struct _HTTPConData {
     Bool         partial_cache_file;
     Bool         reuse_stream;
     Bool         connection_is_valid;
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(NS_OPENSSL)
     Bool         calling_netlib_all_the_time;  /* is SetCallNetlibAllTheTime set? */
+#endif
+#ifdef NS_OPENSSL
+    Bool         secure;            /* https: TLS on the connection */
+    Bool         tls_wait_write;    /* handshake waits for writability */
 #endif
     void        *write_post_data_data;   /* a data object 
                                           * for the WritePostData function */
@@ -462,6 +470,10 @@ net_start_http_connect(ActiveEntry * ce)
   int def_port;
 
   def_port = DEF_HTTP_PORT;
+#ifdef NS_OPENSSL
+  if(cd->secure && !cd->proxy_server)
+    def_port = DEF_HTTPS_PORT;
+#endif
 
   HG22201
 
@@ -563,6 +575,10 @@ net_start_http_connect(ActiveEntry * ce)
       {
     if(cd->use_proxy_tunnel)
             cd->next_state = HTTP_SEND_PROXY_TUNNEL_REQUEST;
+#ifdef NS_OPENSSL
+    else if(cd->secure)
+      cd->next_state = HTTP_TLS_HANDSHAKE;
+#endif
     else if(ce->URL_s->files_to_post)
       cd->next_state = HTTP_BEGIN_UPLOAD_FILE;
     else
@@ -595,6 +611,10 @@ net_finish_http_connect(ActiveEntry * ce)
     int def_port;
 
     def_port = DEF_HTTP_PORT;
+#ifdef NS_OPENSSL
+    if(cd->secure && !cd->proxy_server)
+      def_port = DEF_HTTPS_PORT;
+#endif
     HG92892
 
     /* if proxy_server is non NULL then use the string as a host:port
@@ -699,6 +719,10 @@ net_finish_http_connect(ActiveEntry * ce)
     ce->socket = cd->connection->sock;
     if(cd->use_proxy_tunnel)
             cd->next_state = HTTP_SEND_PROXY_TUNNEL_REQUEST;
+#ifdef NS_OPENSSL
+    else if(cd->secure)
+      cd->next_state = HTTP_TLS_HANDSHAKE;
+#endif
     else if(ce->URL_s->files_to_post)
       cd->next_state = HTTP_BEGIN_UPLOAD_FILE;
     else
@@ -1878,6 +1902,11 @@ net_parse_http_mime_headers (ActiveEntry *ce)
        *
        * fd is cd->connection->sock
        */
+#ifdef NS_OPENSSL
+      if(cd->secure)
+        cd->next_state = HTTP_TLS_HANDSHAKE;
+      else
+#endif
       if(ce->URL_s->files_to_post)
         cd->next_state = HTTP_BEGIN_UPLOAD_FILE;
       else
@@ -3222,6 +3251,12 @@ net_HTTPLoad (ActiveEntry * ce)
     cd->proxy_server     = ce->proxy_addr;
   cd->proxy_conf       = ce->proxy_conf;
     cd->send_http1       = TRUE;
+#ifdef NS_OPENSSL
+    cd->secure = (NET_URL_Type(ce->URL_s->address) == SECURE_HTTP_TYPE_URL);
+    /* https through a proxy: CONNECT, then TLS end to end. */
+    if(cd->secure && cd->proxy_server)
+      cd->use_proxy_tunnel = TRUE;
+#endif
 
   /* set partial_cache_file if the whole file is not 
    * cached
@@ -3381,6 +3416,9 @@ net_HTTPLoad (ActiveEntry * ce)
         StrAllocCopy(cd->connection->hostname, use_host);
   
         HG93882
+#ifdef NS_OPENSSL
+        cd->connection->secure = cd->secure;
+#endif
   
         cd->connection->prev_cache = FALSE;  /* this wasn't from the cache */
   
@@ -3451,6 +3489,110 @@ net_HTTPLoad (ActiveEntry * ce)
 }
 
 
+#ifdef NS_OPENSSL
+/* Put TLS on the connection and run the handshake, without blocking: wait
+ * on the socket for whichever direction OpenSSL needs (a read select is
+ * already set from the connect; a write select is the connect select). */
+PRIVATE int
+net_http_tls_handshake(ActiveEntry *ce)
+{
+    HTTPConData *cd = (HTTPConData *)ce->con_data;
+    PRFileDesc *sock = cd->connection->sock;
+    XP_Bool want_write = FALSE;
+    int rv;
+
+    if(!NET_TLS_IsTLS(sock))
+      {
+        char *host = NET_ParseURL(ce->URL_s->address, GET_HOST_PART);
+        char *colon = host ? PL_strchr(host, ':') : NULL;
+
+        if(colon)
+            *colon = '\0';
+        rv = NET_TLS_Wrap(sock, host ? host : "", &ce->URL_s->error_msg);
+        PR_FREEIF(host);
+        if(rv < 0)
+          {
+            cd->next_state = HTTP_ERROR_DONE;
+            return rv;
+          }
+        NET_Progress(ce->window_id, "Negotiating a secure connection...");
+      }
+
+    rv = NET_TLS_Handshake(sock, &want_write, &ce->URL_s->error_msg);
+    if(rv == MK_WAITING_FOR_CONNECTION)
+      {
+        if(want_write && !cd->tls_wait_write)
+          {
+            ce->con_sock = sock;
+            NET_SetConnectSelect(ce->window_id, sock);
+            cd->tls_wait_write = TRUE;
+          }
+        else if(!want_write && cd->tls_wait_write)
+          {
+            NET_ClearConnectSelect(ce->window_id, sock);
+            ce->con_sock = NULL;
+            cd->tls_wait_write = FALSE;
+          }
+        cd->pause_for_read = TRUE;
+        return 0;
+      }
+
+    if(cd->tls_wait_write)
+      {
+        NET_ClearConnectSelect(ce->window_id, sock);
+        ce->con_sock = NULL;
+        cd->tls_wait_write = FALSE;
+      }
+    if(rv < 0)
+      {
+        cd->next_state = HTTP_ERROR_DONE;
+        return rv;
+      }
+
+      {
+        char *what = NET_TLS_Describe(sock);
+        if(what)
+          {
+            char *msg = PR_smprintf("Secure connection: %s", what);
+            if(msg)
+              {
+                NET_Progress(ce->window_id, msg);
+                PR_Free(msg);
+              }
+            PR_Free(what);
+          }
+      }
+    if(ce->URL_s->files_to_post)
+        cd->next_state = HTTP_BEGIN_UPLOAD_FILE;
+    else
+        cd->next_state = HTTP_SEND_REQUEST;
+    return 0;
+}
+
+/* OpenSSL may hold decrypted data the socket no longer shows: while it
+ * does, have netlib call in without waiting for select (the TLS layer's
+ * poll method reports the socket readable then). */
+PRIVATE void
+net_http_tls_kick(ActiveEntry *ce, HTTPConData *cd)
+{
+    XP_Bool pending;
+
+    if(!cd->secure || !cd->connection || !cd->connection->sock)
+        return;
+    pending = NET_TLS_Pending(cd->connection->sock) > 0;
+    if(pending && !cd->calling_netlib_all_the_time)
+      {
+        NET_SetCallNetlibAllTheTime(ce->window_id, "mkhttp");
+        cd->calling_netlib_all_the_time = TRUE;
+      }
+    else if(!pending && cd->calling_netlib_all_the_time && !cd->posting)
+      {
+        NET_ClearCallNetlibAllTheTime(ce->window_id, "mkhttp");
+        cd->calling_netlib_all_the_time = FALSE;
+      }
+}
+#endif /* NS_OPENSSL */
+
 /* NET_process_HTTP  will control the state machine that
  * loads an HTTP document
  *
@@ -3483,6 +3625,12 @@ net_ProcessHTTP (ActiveEntry *ce)
             /* send proxy tunnel init stuff */
             ce->status = net_send_proxy_tunnel_request(ce);
             break;
+
+#ifdef NS_OPENSSL
+        case HTTP_TLS_HANDSHAKE:
+            ce->status = net_http_tls_handshake(ce);
+            break;
+#endif
 
         case HTTP_BEGIN_UPLOAD_FILE:
             /* form a put request */
@@ -3659,6 +3807,10 @@ HG51096
             PR_FREEIF(cd->orig_host);
             if(cd->tcp_con_data)
                 NET_FreeTCPConData(cd->tcp_con_data);
+#ifdef NS_OPENSSL
+            if(cd->calling_netlib_all_the_time)
+                NET_ClearCallNetlibAllTheTime(ce->window_id, "mkhttp");
+#endif
             PR_FREEIF(cd);
             JSCF_Cleanup();
             return STATUS (-1); /* final end HTTP_FREE */
@@ -3694,10 +3846,12 @@ HG51096
 
                 NET_ClearReadSelect(ce->window_id, cd->connection->sock);
                 NET_ClearConnectSelect(ce->window_id, cd->connection->sock);
-#ifdef XP_WIN
-                if(cd->calling_netlib_all_the_time)
+#if defined(XP_WIN) || defined(NS_OPENSSL)
+                if(cd->calling_netlib_all_the_time) {
                   NET_ClearCallNetlibAllTheTime(ce->window_id, "mkhttp");
-#endif /* XP_WIN */
+                  cd->calling_netlib_all_the_time = FALSE;
+                }
+#endif /* XP_WIN || NS_OPENSSL */
                 NET_ClearDNSSelect(ce->window_id, cd->connection->sock);
                 PR_Close(cd->connection->sock);
                 NET_TotalNumberOfOpenConnections--;
@@ -3715,7 +3869,10 @@ HG51096
                 cd->pause_for_read = FALSE;
         } /* ce->status < 0 */
     } /* while(!cd->pause_for_read) */
-    
+
+#ifdef NS_OPENSSL
+    net_http_tls_kick(ce, cd);
+#endif
     return STATUS(ce->status);
 }
 
@@ -3821,6 +3978,9 @@ NET_InitHTTPProtocol(void)
   http_proto_impl.cleanup = net_CleanupHTTP;
 
   NET_RegisterProtocolImplementation(&http_proto_impl, HTTP_TYPE_URL);
+#ifdef NS_OPENSSL
+  NET_RegisterProtocolImplementation(&http_proto_impl, SECURE_HTTP_TYPE_URL);
+#endif
   HG93898
 }
 

@@ -3019,6 +3019,10 @@ NET_URL_Type (CONST char *URL)
 		if(!PL_strncasecmp(URL,"http:",5))
 		    return(HTTP_TYPE_URL);
 		HG73678
+#ifdef NS_OPENSSL
+		if(!PL_strncasecmp(URL,"https:",6))
+		    return(SECURE_HTTP_TYPE_URL);
+#endif
 		break;
 	case 'i':
 	case 'I':

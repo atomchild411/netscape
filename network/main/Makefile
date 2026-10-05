@@ -53,9 +53,13 @@ CSRCS += \
 	$(NULL)
 endif
 
+ifdef NS_OPENSSL
+CSRCS += mktls.c
+endif
+
 EXPORTS= mkstream.h mkparse.h mkfsort.h mksort.h mkgeturl.h \
 	netstream.h mkselect.h mktcp.h netutils.h mkpadpac.h mkautocf.h mkhelp.h \
-        mkutils.h mktrace.h
+        mkutils.h mktrace.h mktls.h
 
 ifdef MOZ_MAIL_NEWS
 EXPORTS += mkldap.h

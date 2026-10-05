@@ -51,6 +51,11 @@ NET_ExplainErrorDetails (int code, ...)
 
   va_start (args, code);
 
+#ifdef NS_OPENSSL
+  if (getenv("NETSCAPE_NET_DEBUG"))
+	  fprintf(stderr, "netlib: error %d\n", code);
+#endif
+
   if (IS_SSL_ERROR(code) || IS_SEC_ERROR(code)) {
 	  const char *s = XP_GetString(code);
 	  msg = (s ? XP_STRDUP(s) : 0);

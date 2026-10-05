@@ -455,6 +455,11 @@ ifdef NO_SECURITY
 DEFINES		+= -DNO_SECURITY
 endif
 
+# TLS for netlib from OpenSSL (network/main/mktls.c).
+ifdef NS_OPENSSL
+DEFINES		+= -DNS_OPENSSL
+endif
+
 # Crash-reporting system
 ifdef MOZ_FULLCIRCLE
 DEFINES		+= -DMOZ_FULLCIRCLE

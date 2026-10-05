@@ -214,6 +214,13 @@ do_end_crc_check(DataObject *obj)
 		if(obj->crc_check != crc_int
            || obj->d_stream.total_out != size_int)
 		{
+#ifdef NS_OPENSSL
+            if (getenv("NETSCAPE_NET_DEBUG"))
+                fprintf(stderr, "gzip: footer crc %08lx size %lu, have crc %08lx size %lu\n",
+                        (unsigned long) crc_int, (unsigned long) size_int,
+                        (unsigned long) obj->crc_check,
+                        (unsigned long) obj->d_stream.total_out);
+#endif
 			/* crc or size checksum failure */
             obj->URL_s->error_msg = NET_ExplainErrorDetails(MK_BAD_GZIP_HEADER);
             return MK_BAD_GZIP_HEADER;
@@ -231,8 +238,10 @@ PRIVATE int net_UnZipWrite (NET_StreamClass *stream, CONST char* s, int32 l)
     uint32 prev_total_out;
     uint32 new_data_total_out;
     uint32 input_used_up, input_left_over;
-	char * tempPtr = NULL;
 	DataObject *obj=stream->data_object;	
+	/* Append to what is already buffered (a gzip header can arrive in
+	 * pieces: some servers send its first byte in a chunk of its own). */
+	char * tempPtr = (char *) obj->incoming_buf;
     if(obj->is_done) 
     {
 		/* multipart gzip? */
@@ -267,6 +276,13 @@ PRIVATE int net_UnZipWrite (NET_StreamClass *stream, CONST char* s, int32 l)
         }
         else if(status == BAD_HEADER)
         {
+#ifdef NS_OPENSSL
+            if (getenv("NETSCAPE_NET_DEBUG"))
+                fprintf(stderr, "gzip: bad header %02x %02x %02x %02x (%lu bytes)\n",
+                        obj->incoming_buf[0], obj->incoming_buf[1],
+                        obj->incoming_buf[2], obj->incoming_buf[3],
+                        (unsigned long) obj->incoming_buf_size);
+#endif
             obj->URL_s->error_msg = NET_ExplainErrorDetails(MK_BAD_GZIP_HEADER);
             return MK_BAD_GZIP_HEADER;
         }

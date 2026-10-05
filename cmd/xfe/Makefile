@@ -676,6 +676,9 @@ ifeq ($(OS_ARCH),IRIX)
 ifdef NS_USE_GCC
 # pkgsrc's Motif and X libraries: SGI's libSgm extends IRIX's own Motif only.
 OTHER_LIBS	= -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm -lpthread $(OS_LIBS)
+ifdef NS_OPENSSL
+OTHER_LIBS	:= -lssl -lcrypto $(OTHER_LIBS)
+endif
 else
 OTHER_LIBS	= -lSgm $(MOTIFPATCH_LIB) -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm $(OS_LIBS)
 endif
