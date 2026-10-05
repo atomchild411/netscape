@@ -723,6 +723,16 @@ net_RegisterDefaultEncodingDecoders (void)
   NET_RegisterAllEncodingConverters (TEXT_HTML,       FO_PRESENT);
   NET_RegisterAllEncodingConverters (TEXT_MDL,        FO_PRESENT);
   NET_RegisterAllEncodingConverters (TEXT_PLAIN,      FO_PRESENT);
+#ifdef NS_LIBCSS
+  /* linked style sheets for libcss come compressed too */
+  NET_RegisterAllEncodingConverters (TEXT_CSS,        FO_NSCSS);
+#endif
+#ifdef NS_QUICKJS
+  /* and scripts (SCRIPT SRC=) */
+  NET_RegisterAllEncodingConverters (APPLICATION_JAVASCRIPT, FO_PRESENT);
+  NET_RegisterAllEncodingConverters ("text/javascript", FO_PRESENT);
+  NET_RegisterAllEncodingConverters ("application/javascript", FO_PRESENT);
+#endif
   NET_RegisterAllEncodingConverters (IMAGE_GIF,       FO_PRESENT);
   NET_RegisterAllEncodingConverters (IMAGE_JPG,       FO_PRESENT);
   NET_RegisterAllEncodingConverters (IMAGE_PJPG,      FO_PRESENT);

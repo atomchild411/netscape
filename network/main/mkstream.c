@@ -65,7 +65,9 @@ typedef struct _net_ConverterElement {
 
 static Bool autoFlag = 0;  
 
-#define MAX_FORMATS_OUT FO_ONLY_FROM_CACHE_AND_LOAD_HTML_HELP_MAP_FILE +1
+/* every format with both cache bits (FO_ONLY_FROM_CACHE | FO_CACHE_ONLY | 63):
+ * decoders for a format above 20 (FO_NSCSS) ran past the end */
+#define MAX_FORMATS_OUT (FO_ONLY_FROM_CACHE | FO_CACHE_ONLY | 63) + 1
 
 static Bool needInit = TRUE;  /* this is the flag to tell us that we need to initialize
 								net_converter_list, and  net_decoder_list. */
