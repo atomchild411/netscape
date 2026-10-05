@@ -451,7 +451,7 @@ void CEditElement::SetTagData( PA_Tag* pTag, char* pTagData){
 }
 
 PA_Tag* CEditElement::TagOpen( int /* iEditOffset */ ){
-    PA_Tag *pTag = XP_NEW( PA_Tag );
+    PA_Tag *pTag = XP_NEW_ZAP( PA_Tag );
     XP_BZERO( pTag, sizeof( PA_Tag ) );
     if( GetTagData() ){
         SetTagData( pTag, GetTagData() );
@@ -464,7 +464,7 @@ PA_Tag* CEditElement::TagOpen( int /* iEditOffset */ ){
 
 PA_Tag* CEditElement::TagEnd( ){
     if( TagHasClose( m_tagType ) || BitSet( edt_setWriteEndTag, m_tagType ) ){
-        PA_Tag *pTag = XP_NEW( PA_Tag );
+        PA_Tag *pTag = XP_NEW_ZAP( PA_Tag );
         XP_BZERO( pTag, sizeof( PA_Tag ) );
         pTag->type = m_tagType;
         pTag->is_end = TRUE;
@@ -2092,7 +2092,7 @@ PA_Tag* CEditTableElement::InternalTagOpen( int iEditOffset, XP_Bool bForPrintin
 
     // create the DIV tag if we need to.
     if( m_align == ED_ALIGN_ABSCENTER || m_align == ED_ALIGN_RIGHT ){
-        pTag = XP_NEW( PA_Tag );
+        pTag = XP_NEW_ZAP( PA_Tag );
         XP_BZERO( pTag, sizeof( PA_Tag ) );
         if( m_align== ED_ALIGN_RIGHT ){
             SetTagData( pTag, "ALIGN=right>");
@@ -2109,7 +2109,7 @@ PA_Tag* CEditTableElement::InternalTagOpen( int iEditOffset, XP_Bool bForPrintin
     EDT_TableData* pTableData = GetData();
     char* pTagData = CreateTagData(pTableData, bForPrinting);
     if ( pTagData ) {
-        pTag = XP_NEW( PA_Tag );
+        pTag = XP_NEW_ZAP( PA_Tag );
         XP_BZERO( pTag, sizeof( PA_Tag ) );
         SetTagData( pTag, pTagData );
         XP_FREE(pTagData);
@@ -2132,7 +2132,7 @@ PA_Tag* CEditTableElement::InternalTagOpen( int iEditOffset, XP_Bool bForPrintin
 PA_Tag* CEditTableElement::TagEnd( ){
     PA_Tag *pRet = CEditElement::TagEnd();
     if( m_align == ED_ALIGN_ABSCENTER || m_align == ED_ALIGN_RIGHT ){
-        PA_Tag* pTag = XP_NEW( PA_Tag );
+        PA_Tag* pTag = XP_NEW_ZAP( PA_Tag );
         XP_BZERO( pTag, sizeof( PA_Tag ) );
         pTag->is_end = TRUE;
         if( m_align == ED_ALIGN_RIGHT ){
@@ -6315,7 +6315,7 @@ XP_Bool CEditLeafElement::IsComment(char* /*prefix*/){
 // Default implementation
 //
 PA_Tag* CEditLeafElement::TagOpen( int /* iEditOffset */ ){
-    PA_Tag *pTag = XP_NEW( PA_Tag );
+    PA_Tag *pTag = XP_NEW_ZAP( PA_Tag );
     XP_BZERO( pTag, sizeof( PA_Tag ) );
     if( GetTagData() ){
         SetTagData( pTag, GetTagData() );
@@ -6386,7 +6386,7 @@ void CEditLeafElement::StreamToPositionalText( IStreamOut *pOut, XP_Bool bEnd ){
 //
 CEditContainerElement* CEditContainerElement::NewDefaultContainer( CEditElement *pParent,
         ED_Alignment align  ){
-    PA_Tag *pTag = XP_NEW( PA_Tag );
+    PA_Tag *pTag = XP_NEW_ZAP( PA_Tag );
     XP_BZERO( pTag, sizeof( PA_Tag ) );
 #ifdef EDT_DDT
     pTag->type = P_NSDT;
@@ -6739,7 +6739,7 @@ PA_Tag* CEditContainerElement::TagOpen( int iEditOffset ){
 
     // create the DIV tag if we need to.
     if( m_align == ED_ALIGN_ABSCENTER || m_align == ED_ALIGN_RIGHT ){
-        pTag = XP_NEW( PA_Tag );
+        pTag = XP_NEW_ZAP( PA_Tag );
         XP_BZERO( pTag, sizeof( PA_Tag ) );
         if( m_align== ED_ALIGN_RIGHT ){
             SetTagData( pTag, "ALIGN=right>");
@@ -6754,7 +6754,7 @@ PA_Tag* CEditContainerElement::TagOpen( int iEditOffset ){
 
     // create the actual paragraph tag
     if( GetTagData() ){
-        pTag = XP_NEW( PA_Tag );
+        pTag = XP_NEW_ZAP( PA_Tag );
         XP_BZERO( pTag, sizeof( PA_Tag ) );
         SetTagData( pTag, GetTagData() );
     }
@@ -6775,7 +6775,7 @@ PA_Tag* CEditContainerElement::TagOpen( int iEditOffset ){
 PA_Tag* CEditContainerElement::TagEnd( ){
     PA_Tag *pRet = CEditElement::TagEnd();
     if( m_align == ED_ALIGN_ABSCENTER || m_align == ED_ALIGN_RIGHT ){
-        PA_Tag* pTag = XP_NEW( PA_Tag );
+        PA_Tag* pTag = XP_NEW_ZAP( PA_Tag );
         XP_BZERO( pTag, sizeof( PA_Tag ) );
         pTag->is_end = TRUE;
         if( m_align == ED_ALIGN_RIGHT ){
@@ -7273,7 +7273,7 @@ CEditListElement::~CEditListElement()
 }
 
 PA_Tag* CEditListElement::TagOpen( int /* iEditOffset */ ){
-    PA_Tag *pTag = XP_NEW( PA_Tag );
+    PA_Tag *pTag = XP_NEW_ZAP( PA_Tag );
     XP_BZERO( pTag, sizeof( PA_Tag ) );
     SetTagData( pTag, GetTagData() ? GetTagData() : ">" );
     return pTag;
@@ -8477,7 +8477,7 @@ PA_Tag* CEditTextElement::TagOpen( int iEditOffset ){
         return 0;
     }
 
-    PA_Tag *pTag = XP_NEW( PA_Tag );
+    PA_Tag *pTag = XP_NEW_ZAP( PA_Tag );
     XP_BZERO( pTag, sizeof( PA_Tag ) );
 
     FormatOpenTags( pStart, pEnd );    
@@ -10086,7 +10086,7 @@ XP_Bool CEditIconElement::GetLOElementAndOffset( ElementOffset iEditOffset, XP_B
 }
 
 PA_Tag* CEditIconElement::TagOpen( int /* iEditOffset */ ){
-    PA_Tag *pTag = XP_NEW( PA_Tag );
+    PA_Tag *pTag = XP_NEW_ZAP( PA_Tag );
     XP_BZERO( pTag, sizeof( PA_Tag ) );
     SetTagData( pTag, m_pSpoofData );
     return pTag;
@@ -10614,7 +10614,7 @@ void CEditIconElement::SetData( char *pData ){
 
 
     // Build up a tag that we can fetch parameter strings from.
-    PA_Tag *pTag = XP_NEW( PA_Tag );
+    PA_Tag *pTag = XP_NEW_ZAP( PA_Tag );
     XP_BZERO( pTag, sizeof( PA_Tag ) );
     SetTagData( pTag, pData );
     pTag->is_end = m_bEndTag;
@@ -10677,7 +10677,7 @@ void CEditIconElement::SetSize(XP_Bool bWidthPercent, int32 iWidth,
                                XP_Bool bHeightPercent, int32 iHeight){
     
     // Do NOT use TagOpen -- this  gets the "m_pSpoofData" junk
-    PA_Tag *pTag = XP_NEW( PA_Tag );
+    PA_Tag *pTag = XP_NEW_ZAP( PA_Tag );
     XP_BZERO( pTag, sizeof( PA_Tag ) );
     // This string has initial "<"
     SetTagData( pTag, GetData() );

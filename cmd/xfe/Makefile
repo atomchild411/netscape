@@ -694,7 +694,7 @@ ifdef NS_LIBCSS
 OTHER_LIBS	:= -Wl,-Bstatic -lcss -lparserutils -lwapcaplet -Wl,-Bdynamic $(OTHER_LIBS)
 endif
 ifdef NS_QUICKJS
-OTHER_LIBS	:= -Wl,-Bstatic -lquickjs -Wl,-Bdynamic $(OTHER_LIBS)
+OTHER_LIBS	:= -Wl,-Bstatic -lquickjs -ldom -lhubbub -lparserutils -lwapcaplet -Wl,-Bdynamic $(OTHER_LIBS)
 endif
 else
 # pkgsrc's Motif and X libraries: SGI's libSgm extends IRIX's own Motif only.
@@ -706,7 +706,7 @@ ifdef NS_LIBCSS
 OTHER_LIBS	:= -lcss -lparserutils -lwapcaplet $(OTHER_LIBS)
 endif
 ifdef NS_QUICKJS
-OTHER_LIBS	:= -lquickjs -ldl $(OTHER_LIBS)
+OTHER_LIBS	:= -lquickjs -ldom -lhubbub -lparserutils -lwapcaplet -ldl $(OTHER_LIBS)
 endif
 endif
 else

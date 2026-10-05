@@ -260,7 +260,7 @@ intn CEditBuffer::NormalizePreformatText(pa_DocData *pData, PA_Tag* pTag,
         }
 
 
-        PA_Tag *pNewTag = XP_NEW( PA_Tag );
+        PA_Tag *pNewTag = XP_NEW_ZAP( PA_Tag );
         XP_BZERO( pNewTag, sizeof( PA_Tag ) );
         pNewTag->type = P_TEXT;
 
@@ -278,7 +278,7 @@ intn CEditBuffer::NormalizePreformatText(pa_DocData *pData, PA_Tag* pTag,
         pBuf = pText;
         retVal = EDT_ProcessTag( pData, pNewTag, status );
         if( bBreak ){
-            pNewTag = XP_NEW( PA_Tag );
+            pNewTag = XP_NEW_ZAP( PA_Tag );
             XP_BZERO( pNewTag, sizeof( PA_Tag ) );
             pNewTag->type = P_LINEBREAK;
             retVal = EDT_ProcessTag( pData, pNewTag, status );
@@ -3769,7 +3769,7 @@ void CEditBuffer::IndentContainer( CEditContainerElement *pContainer, CEditListE
     //
     if( !bDone && pList == 0 )
     {
-        PA_Tag *pTag = XP_NEW( PA_Tag );
+        PA_Tag *pTag = XP_NEW_ZAP( PA_Tag );
         XP_BZERO( pTag, sizeof( PA_Tag ) );
         // Set appropriate list type for the given list item
         // (E.g., only list items should exist inside of UL, OL)
@@ -8372,7 +8372,7 @@ void CEditBuffer::InsertBreak( ED_BreakType eBreak, XP_Bool bTyping ){
     }
 
     StartTyping(bTyping);
-    PA_Tag *pTag = XP_NEW( PA_Tag );
+    PA_Tag *pTag = XP_NEW_ZAP( PA_Tag );
     XP_BZERO( pTag, sizeof( PA_Tag ) );
     pTag->type = P_LINEBREAK;
 

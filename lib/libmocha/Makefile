@@ -34,6 +34,8 @@ ifdef NS_QUICKJS
 REQUIRES	= lay parse img style layer dbm nspr htmldlgs util pref netcache \
 		  network httpurl
 CSRCS		= qjs_core.c \
+		  qjs_dom.c \
+		  qjs_net.c \
 		  qjs_window.c \
 		  $(NULL)
 else

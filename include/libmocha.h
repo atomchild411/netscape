@@ -143,6 +143,10 @@ typedef struct MochaDecoder {
      * Form elements are special, since they can't use the same keying
      */
     PRHashTable     *id_to_object_map;
+#ifdef NS_QUICKJS
+    void            *qjs_dom;       /* the document's tree (qjs_dom.c) */
+    void            *qjs_loads;     /* fetches for scripts (qjs_net.c) */
+#endif
 } MochaDecoder;
 
 /* 
@@ -440,6 +444,12 @@ LO_ResizeSelectOptions(lo_FormElementSelectData *selectData);
 /*
  * Discard the current document and all its subsidiary objects.
  */
+#ifdef NS_QUICKJS
+/* Layout is about to lay TAG out: add it to the document's DOM (and set
+ * tag->dom_node). */
+extern void LM_DomTag(MWContext *context, PA_Tag *tag);
+#endif
+
 extern void
 LM_ReleaseDocument(MWContext *context, JSBool resize_reload);
 

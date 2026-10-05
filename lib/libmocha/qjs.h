@@ -46,6 +46,23 @@ extern void qjs_InitWindow(JSContext *cx, MochaDecoder *decoder);
 extern XP_Bool qjs_Evaluate(MochaDecoder *decoder, const char *src, size_t len,
 							const char *filename, int lineno, char **result);
 
+/* Call FN with a time budget (as a script gets), then run promise jobs.
+ * An exception is logged; the result (maybe JS_EXCEPTION) is the caller's. */
+extern JSValue qjs_Call(JSContext *cx, JSValueConst fn, JSValueConst this_val,
+						int argc, JSValueConst *argv);
+
+/* The DOM (qjs_dom.c) and fetches for scripts (qjs_net.c). */
+extern void qjs_InitDom(JSContext *cx, JSValueConst ns);
+extern void qjs_DomDropObjects(MochaDecoder *decoder);
+extern void qjs_DomFree(MochaDecoder *decoder);
+extern void qjs_DomResizeReload(MochaDecoder *decoder);
+extern JSBool qjs_DomEvent(MWContext *context, LO_Element *element,
+						   JSEvent *event);
+extern void qjs_DomSyncNames(JSContext *cx);
+extern void qjs_DropLoads(MochaDecoder *decoder);
+extern JSValue qjs_ns_load(JSContext *cx, JSValueConst this_val, int argc,
+						   JSValueConst *argv);
+
 /* Log the pending exception of CX (NETSCAPE_JS_LOG=/file, or stderr). */
 extern void qjs_ReportException(JSContext *cx);
 extern void qjs_Log(const char *fmt, ...);

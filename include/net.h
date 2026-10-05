@@ -116,6 +116,7 @@ typedef struct _net_MemoryCacheObject net_MemoryCacheObject;
 #define FO_XMLHTML               37 /* HTML inclusions in XML */
 #define FO_NGLAYOUT             38 /* NGLayout streams */
 #define FO_NSCSS                39 /* linked style sheets for libcss (NS_LIBCSS) */
+#define FO_QJSLOAD              40 /* fetches for scripts (NS_QUICKJS) */
 
 /* bitfield detectable CACHE FO's
  */
@@ -150,6 +151,7 @@ typedef struct _net_MemoryCacheObject net_MemoryCacheObject;
 #define FO_CACHE_AND_XMLCSS   (FO_CACHE_ONLY | FO_XMLCSS)
 #define FO_CACHE_AND_XMLHTML   (FO_CACHE_ONLY | FO_XMLHTML)
 #define FO_CACHE_AND_NSCSS   (FO_CACHE_ONLY | FO_NSCSS)
+#define FO_CACHE_AND_QJSLOAD (FO_CACHE_ONLY | FO_QJSLOAD)
 #define FO_CACHE_AND_CRAWL_PAGE			(FO_CACHE_ONLY | FO_CRAWL_PAGE)
 #define FO_CACHE_AND_CRAWL_RESOURCE		(FO_CACHE_ONLY | FO_CRAWL_RESOURCE)
 #define FO_CACHE_AND_ROBOTS_TXT			(FO_CACHE_ONLY | FO_ROBOTS_TXT)

@@ -265,14 +265,52 @@ extern void qjs_ClearTimeouts(MochaDecoder *decoder);
 void
 qjs_DropContext(MochaDecoder *decoder)
 {
-	if (!decoder || !decoder->js_context)
+	if (!decoder)
 		return;
-	qjs_ClearTimeouts(decoder);
-	JS_FreeContext(decoder->js_context);
-	decoder->js_context = NULL;
-	if (decoder->window_context)
-		decoder->window_context->mocha_context = NULL;
-	JS_RunGC(qjs_Runtime());
+	if (decoder->js_context) {
+		qjs_ClearTimeouts(decoder);
+		qjs_DropLoads(decoder);
+		/* the DOM's node objects first: they hold the tree's nodes */
+		qjs_DomDropObjects(decoder);
+		JS_FreeContext(decoder->js_context);
+		decoder->js_context = NULL;
+		if (decoder->window_context)
+			decoder->window_context->mocha_context = NULL;
+		JS_RunGC(qjs_Runtime());
+	}
+	qjs_DomFree(decoder);
+}
+
+static void
+qjs_run_jobs(void)
+{
+	JSContext *jcx;
+
+	while (JS_ExecutePendingJob(qjs_Runtime(), &jcx) > 0)
+		;
+}
+
+JSValue
+qjs_Call(JSContext *cx, JSValueConst fn, JSValueConst this_val, int argc,
+		 JSValueConst *argv)
+{
+	XP_Bool nested = qjs_running;
+	JSValue rv;
+
+	if (!nested) {
+		gettimeofday(&qjs_deadline, NULL);
+		qjs_deadline.tv_sec += QJS_SCRIPT_SECONDS;
+		qjs_running = TRUE;
+	}
+	qjs_DomSyncNames(cx);
+	rv = JS_Call(cx, fn, this_val, argc, (JSValue *) argv);
+	if (JS_IsException(rv))
+		qjs_ReportException(cx);
+	if (!nested) {
+		qjs_run_jobs();
+		qjs_running = FALSE;
+	}
+	return rv;
 }
 
 XP_Bool
@@ -292,10 +330,9 @@ qjs_Evaluate(MochaDecoder *decoder, const char *src, size_t len,
 		qjs_deadline.tv_sec += QJS_SCRIPT_SECONDS;
 		qjs_running = TRUE;
 	}
+	qjs_DomSyncNames(cx);
 	v = JS_Eval(cx, src, len, filename ? filename : "<script>",
 				JS_EVAL_TYPE_GLOBAL);
-	if (!nested)
-		qjs_running = FALSE;
 	if (JS_IsException(v)) {
 		qjs_ReportException(cx);
 		ok = FALSE;
@@ -308,10 +345,9 @@ qjs_Evaluate(MochaDecoder *decoder, const char *src, size_t len,
 	}
 	JS_FreeValue(cx, v);
 	/* promise jobs (async functions, then()) */
-	{
-		JSContext *jcx;
-		while (JS_ExecutePendingJob(qjs_Runtime(), &jcx) > 0)
-			;
+	if (!nested) {
+		qjs_run_jobs();
+		qjs_running = FALSE;
 	}
 	return ok;
 }
@@ -762,6 +798,8 @@ LM_ReleaseDocument(MWContext *context, JSBool resize_reload)
 	 * scripts: keep what they made. */
 	if (!resize_reload)
 		qjs_DropContext(decoder);
+	else
+		qjs_DomResizeReload(decoder);
 	decoder->stream = NULL;
 	decoder->load_event_sent = FALSE;
 	while (decoder->nesting_url) {
@@ -929,17 +967,7 @@ ET_ReflectWindow(MWContext *context, PA_Block onLoad, PA_Block onUnload,
 	XP_FREEIF(all);
 }
 
-void
-ET_ReflectObject(MWContext *context, void *lo_ele, void *tag,
-				 int32 layer_id, uint index, ReflectedObject type)
-{
-}
-
-void
-ET_ReflectFormElement(MWContext *context, void *form,
-					  LO_FormElementStruct *form_element, PA_Tag *tag)
-{
-}
+/* ET_ReflectObject, ET_ReflectFormElement: qjs_dom.c */
 
 void ET_SetActiveForm(MWContext *context, struct lo_FormData_struct *form) { }
 void ET_SetActiveLayer(MWContext *context, int32 layer_id) { }

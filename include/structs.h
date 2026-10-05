@@ -397,6 +397,7 @@ struct PA_Tag_struct {
     void *lo_data;
     struct PA_Tag_struct *next;
     ED_Element *edit_element;
+    void *dom_node;		/* its node in the document's DOM (libmocha) */
 };
 
 #define PA_HAS_PDATA( tag ) (tag->pVoid != 0 )

@@ -70,7 +70,7 @@ PA_CloneMDLTag(PA_Tag * src)
 	 * Allocate a new tag structure, return NULL
 	 * if you can't.
 	 */
-	tag = XP_NEW(PA_Tag);
+	tag = XP_NEW_ZAP(PA_Tag);
 	if (tag == NULL)
 	{
 		return(NULL);
@@ -78,6 +78,7 @@ PA_CloneMDLTag(PA_Tag * src)
 	tag->type = src->type;
 	tag->is_end = src->is_end;
 	tag->newline_count = src->newline_count;
+	tag->dom_node = src->dom_node;
 	tag->data_len = src->data_len;
 	tag->true_len = src->true_len;
 	tag->lo_data = NULL;
@@ -135,7 +136,7 @@ pa_CreateMDLTag(pa_DocData *doc_data, char *buf, int32 len)
 	 * Allocate a new tag structure, return NULL
 	 * if you can't.
 	 */
-	tag = XP_NEW(PA_Tag);
+	tag = XP_NEW_ZAP(PA_Tag);
 	if (tag == NULL)
 	{
 		return(NULL);
@@ -257,7 +258,7 @@ pa_CreateTextTag(pa_DocData *doc_data, char *buf, int32 len)
 	 * Allocate a new tag structure, return NULL
 	 * if you can't.
 	 */
-	tag = XP_NEW(PA_Tag);
+	tag = XP_NEW_ZAP(PA_Tag);
 	if (tag == NULL)
 	{
 		return(NULL);
@@ -1890,6 +1891,12 @@ PA_FetchAllNameValues(PA_Tag *tag, char ***names, char ***values, uint16 win_csi
 Bool
 PA_HasMocha(PA_Tag *tag)
 {
+#ifdef NS_QUICKJS
+    /* a tag with an element in the DOM: what layout makes of it is
+     * reflected, so events on it reach the element */
+    if (tag->dom_node != NULL)
+        return TRUE;
+#endif
 	int32 cnt;
 	char *buf;
 #ifndef LENIENT_END_TAG

@@ -710,6 +710,16 @@ NET_StreamClass * LO_CSSConverter(FO_Present_Types format_out, void *data_object
   NET_RegisterContentTypeConverter ("*", FO_CACHE_AND_NSCSS, NULL, NET_CacheConverter);
     }
 #endif
+#ifdef NS_QUICKJS
+    /* fetches for scripts: XMLHttpRequest, fetch(), inserted scripts
+     * (lib/libmocha/qjs_net.c) */
+    {
+NET_StreamClass * LM_LoadConverter(FO_Present_Types format_out, void *data_object, URL_Struct *URL_s, MWContext *window_id);
+
+  NET_RegisterContentTypeConverter ("*", FO_QJSLOAD, NULL, LM_LoadConverter);
+  NET_RegisterContentTypeConverter ("*", FO_CACHE_AND_QJSLOAD, NULL, NET_CacheConverter);
+    }
+#endif
 
 }
 
@@ -732,6 +742,8 @@ net_RegisterDefaultEncodingDecoders (void)
   NET_RegisterAllEncodingConverters (APPLICATION_JAVASCRIPT, FO_PRESENT);
   NET_RegisterAllEncodingConverters ("text/javascript", FO_PRESENT);
   NET_RegisterAllEncodingConverters ("application/javascript", FO_PRESENT);
+  /* and what scripts fetch */
+  NET_RegisterAllEncodingConverters ("*", FO_QJSLOAD);
 #endif
   NET_RegisterAllEncodingConverters (IMAGE_GIF,       FO_PRESENT);
   NET_RegisterAllEncodingConverters (IMAGE_JPG,       FO_PRESENT);

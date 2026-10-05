@@ -2558,6 +2558,9 @@ lo_FlushBlockage(MWContext *context, lo_DocState *state,
 
 		if (state->top_state->out_of_memory == FALSE)
 		{
+#ifdef NS_QUICKJS
+			LM_DomTag(context, tag);
+#endif
 			lo_LayoutTag(context, state, tag);
             if (tag->type == P_LAYER)
             {
@@ -4728,6 +4731,9 @@ XP_TRACE(("Initializing new doc %d\n", doc_id));
 		top_state->state_pushes = 0;
 		top_state->state_pops = 0;
 		
+#ifdef NS_QUICKJS
+		LM_DomTag(context, tag);
+#endif
 		lo_LayoutTag(context, state, tag);
 
 		if (top_state->wedged_on_mocha) {

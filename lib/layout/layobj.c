@@ -643,7 +643,7 @@ lo_PushObject(MWContext* context, lo_DocState* state, PA_Tag* tag)
 		if (new_top->clone_tag != NULL)
 			PA_FreeTag(new_top->clone_tag);
 
-		new_top->clone_tag = XP_NEW(PA_Tag);
+		new_top->clone_tag = XP_NEW_ZAP(PA_Tag);
 		if (new_top->clone_tag != NULL)
 		{
 			XP_MEMCPY(new_top->clone_tag, tag, sizeof(PA_Tag));

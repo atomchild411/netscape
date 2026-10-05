@@ -4,8 +4,7 @@
  * The window's objects (window, document, location, navigator, history,
  * screen, console, timers, dialogs) are made by a JavaScript prelude
  * (qjs_prelude below) from a few natives that only C can provide, kept on a
- * hidden global (__ns).  The DOM proper (elements, getElementById ...) is
- * not here yet: it comes with libdom.
+ * hidden global (__ns).  The document and the DOM are qjs_dom.c's.
  */
 
 #include "qjs.h"
@@ -45,6 +44,50 @@ qjs_doc_url(MochaDecoder *d)
 }
 
 /* ---- natives -------------------------------------------------------------- */
+
+/* resolve(url, base): URL made absolute against BASE (default: the
+ * document's URL) */
+static JSValue
+ns_resolve(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	MochaDecoder *d = qjs_decoder(cx);
+	const char *rel, *base = NULL;
+	char *abs;
+	JSValue v;
+
+	if (argc < 1 || !d || !(rel = JS_ToCString(cx, argv[0])))
+		return JS_EXCEPTION;
+	if (argc > 1 && JS_IsString(argv[1]))
+		base = JS_ToCString(cx, argv[1]);
+	abs = NET_MakeAbsoluteURL((char *) (base && *base ? base : qjs_doc_url(d)),
+							  (char *) rel);
+	v = JS_NewString(cx, abs ? abs : rel);
+	XP_FREEIF(abs);
+	JS_FreeCString(cx, rel);
+	if (base)
+		JS_FreeCString(cx, base);
+	return v;
+}
+
+/* evalScript(source, url): run a script the page inserted, in the window */
+static JSValue
+ns_eval_script(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	MochaDecoder *d = qjs_decoder(cx);
+	const char *src, *url = NULL;
+	size_t len;
+	XP_Bool ok;
+
+	if (argc < 1 || !d || !(src = JS_ToCStringLen(cx, &len, argv[0])))
+		return JS_EXCEPTION;
+	if (argc > 1 && JS_IsString(argv[1]))
+		url = JS_ToCString(cx, argv[1]);
+	ok = qjs_Evaluate(d, src, len, url ? url : "<inserted script>", 1, NULL);
+	JS_FreeCString(cx, src);
+	if (url)
+		JS_FreeCString(cx, url);
+	return JS_NewBool(cx, ok);
+}
 
 static JSValue
 ns_write(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
@@ -384,16 +427,9 @@ qjs_timer_fire(void *closure)
 	t->fe_timer = NULL;
 	if (repeat)
 		qjs_timer_arm(t);
-	rv = JS_Call(cx, fn, JS_UNDEFINED, 0, NULL);
-	if (JS_IsException(rv))
-		qjs_ReportException(cx);
+	rv = qjs_Call(cx, fn, JS_UNDEFINED, 0, NULL);
 	JS_FreeValue(cx, rv);
 	JS_FreeValue(cx, fn);
-	{
-		JSContext *jcx;
-		while (JS_ExecutePendingJob(JS_GetRuntime(cx), &jcx) > 0)
-			;
-	}
 	/* the call may have cleared it (clearTimeout) or dropped the context */
 	if (!repeat) {
 		qjs_Timer *p;
@@ -483,6 +519,9 @@ static const JSCFunctionListEntry ns_functions[] = {
 	JS_CFUNC_DEF("agent", 0, ns_agent),
 	JS_CFUNC_DEF("windowSize", 0, ns_window_size),
 	JS_CFUNC_DEF("timer", 3, ns_timer),
+	JS_CFUNC_DEF("resolve", 2, ns_resolve),
+	JS_CFUNC_DEF("evalScript", 2, ns_eval_script),
+	JS_CFUNC_DEF("load", 5, qjs_ns_load),
 	JS_CFUNC_DEF("clearTimer", 1, ns_clear_timer),
 };
 
@@ -594,39 +633,6 @@ static const char qjs_prelude[] =
 "    if (s[i + 2] !== undefined) o += String.fromCharCode(n >> 8 & 255);\n"
 "    if (s[i + 3] !== undefined) o += String.fromCharCode(n & 255); }\n"
 "  return o; };\n"
-"var document = { readyState: 'loading', characterSet: 'UTF-8', charset: 'UTF-8',\n"
-"  compatMode: 'CSS1Compat', documentElement: null, body: null, head: null,\n"
-"  forms: [], images: [], links: [], anchors: [], scripts: [], styleSheets: [],\n"
-"  defaultView: g, hidden: false, visibilityState: 'visible' };\n"
-"listeners(document);\n"
-"document.write = function() { ns.write([].join.call(arguments, '')); };\n"
-"document.writeln = function() { ns.write([].join.call(arguments, '') + '\\n'); };\n"
-"document.open = document.close = function() {};\n"
-"document.getElementById = function() { return null; };\n"
-"document.querySelector = function() { return null; };\n"
-"document.querySelectorAll = document.getElementsByTagName =\n"
-"  document.getElementsByClassName = document.getElementsByName = function() { return []; };\n"
-"document.hasFocus = function() { return true; };\n"
-"Object.defineProperty(document, 'URL', { get: function() { return ns.url(); } });\n"
-"Object.defineProperty(document, 'documentURI', { get: function() { return ns.url(); } });\n"
-"Object.defineProperty(document, 'referrer', { get: function() { return ns.referrer(); } });\n"
-"Object.defineProperty(document, 'title', { get: function() { return ns.title(); }, set: function() {} });\n"
-"Object.defineProperty(document, 'cookie', { get: function() { return ns.cookie(); },\n"
-"  set: function(c) { ns.setCookie(String(c)); } });\n"
-"Object.defineProperty(document, 'domain', { get: function() { return location.hostname; }, set: function() {} });\n"
-"Object.defineProperty(document, 'location', { get: function() { return location; },\n"
-"  set: function(u) { ns.navigate(String(u), 0); } });\n"
-"g.document = document;\n"
-"g.Image = function(w, h) { this.width = w || 0; this.height = h || 0; this.src = ''; };\n"
-"g.__ns_fire = function(type) {\n"
-"  if (type === 'load') {\n"
-"    document.readyState = 'interactive';\n"
-"    document.dispatchEvent({ type: 'DOMContentLoaded', target: document });\n"
-"    document.readyState = 'complete';\n"
-"    document.dispatchEvent({ type: 'readystatechange', target: document });\n"
-"  }\n"
-"  g.dispatchEvent({ type: type, target: g });\n"
-"};\n"
 "})(globalThis, globalThis.__ns);\n";
 
 void
@@ -643,6 +649,7 @@ qjs_InitWindow(JSContext *cx, MochaDecoder *decoder)
 	if (JS_IsException(v))
 		qjs_ReportException(cx);
 	JS_FreeValue(cx, v);
+	qjs_InitDom(cx, ns);
 	JS_FreeValue(cx, global);
 }
 
@@ -656,19 +663,12 @@ qjs_fire(JSContext *cx, const char *type)
 	JSValue arg = JS_NewString(cx, type), rv;
 
 	if (JS_IsFunction(cx, fire)) {
-		rv = JS_Call(cx, fire, global, 1, &arg);
-		if (JS_IsException(rv))
-			qjs_ReportException(cx);
+		rv = qjs_Call(cx, fire, global, 1, &arg);
 		JS_FreeValue(cx, rv);
 	}
 	JS_FreeValue(cx, arg);
 	JS_FreeValue(cx, fire);
 	JS_FreeValue(cx, global);
-	{
-		JSContext *jcx;
-		while (JS_ExecutePendingJob(JS_GetRuntime(cx), &jcx) > 0)
-			;
-	}
 }
 
 void
@@ -734,10 +734,14 @@ qjs_SetWindowHandlers(MWContext *context, char *onload, char *onunload)
 	}
 }
 
-/* Clicks, key presses, form submits: no element handlers yet (they come
- * with libdom).  TRUE: go on with the default action. */
+/* Clicks, key presses, form submits: to their elements (qjs_dom.c).
+ * TRUE: go on with the default action. */
 JSBool
 qjs_SendEvent(MWContext *context, LO_Element *element, JSEvent *event)
 {
-	return event->type != EVENT_MOUSEOVER;
+	JSBool ok = qjs_DomEvent(context, element, event);
+
+	/* mouse over a link: the status line shows its URL unless a handler
+	 * said otherwise */
+	return event->type == EVENT_MOUSEOVER ? FALSE : ok;
 }
