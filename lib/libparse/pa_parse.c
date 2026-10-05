@@ -616,6 +616,8 @@ PA_HoldDocData(pa_DocData * doc_data)
  *      give the caller a parsing stream into the parser.
  *      Returns NULL on error.
  *************************************/
+extern void qjs_Log(const char *fmt, ...);
+
 NET_StreamClass *
 PA_BeginParseMDL(FO_Present_Types format_out,
     void *init_data, URL_Struct *anchor, MWContext *window_id)
@@ -626,6 +628,11 @@ PA_BeginParseMDL(FO_Present_Types format_out,
     pa_DocData *doc_data;
 
     new_data = (PA_InitData *)init_data;
+
+    if (getenv("QJS_DOM_TRACE"))
+	qjs_Log("parse: begin %s (format %d, %s)",
+		anchor->address ? anchor->address : "?", (int) format_out,
+		anchor->content_type ? anchor->content_type : "?");
 
     /*
      * If there was a Window-Target http header from the server,

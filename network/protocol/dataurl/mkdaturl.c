@@ -42,6 +42,7 @@ net_DataURLLoad (ActiveEntry * ce)
 	XP_Bool is_base64 = FALSE;
 	NET_StreamClass *stream;
 	char *comma;
+	char *preset = NULL;
 
     ce->protocol = DATA_TYPE_URL;
 
@@ -64,6 +65,13 @@ net_DataURLLoad (ActiveEntry * ce)
 		return(MK_MALFORMED_URL_ERROR);
 	}
 
+	/* A type the caller preset (a <script src> or style sheet load: its
+	 * converter goes by that type) stays: the data's own type would send
+	 * a script to the HTML parser, which then replaced the page. */
+	if(ce->URL_s->preset_content_type && ce->URL_s->content_type &&
+	   *ce->URL_s->content_type)
+		preset = PL_strdup(ce->URL_s->content_type);
+
 	/* fill in default content type */
 	StrAllocCopy(ce->URL_s->content_type, TEXT_PLAIN);
 
@@ -81,6 +89,11 @@ net_DataURLLoad (ActiveEntry * ce)
 		/* parse the rest as a content-type */
 		NET_ParseContentTypeHeader(ce->window_id, data_buffer, ce->URL_s, FALSE);
 
+	}
+	if(preset)
+	{
+		StrAllocCopy(ce->URL_s->content_type, preset);
+		PL_strfree(preset);
 	}
 
 	if(is_base64)
@@ -106,9 +119,10 @@ net_DataURLLoad (ActiveEntry * ce)
 	/* copy the data part of the URL into a scratch buffer */
 	PL_strcpy(data_buffer, comma+1);
 
+    /* the data is %-escaped (base64 data too, before decoding) */
     ce->status = (*stream->put_block)(stream,
                                         data_buffer,
-                                        PL_strlen(data_buffer));
+                                        NET_UnEscapeCnt(data_buffer));
     if(ce->status < 0)
       {
     	(*stream->abort)(stream, ce->status);
