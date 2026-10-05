@@ -1117,6 +1117,116 @@ nscss_unlayer(const char *d, int32 len, int32 *out_len)
 	return b.buf;
 }
 
+static char *nscss_media_list(const char *media);
+
+/* @media lists libcss can read (see nscss_media_list).  Allocated, or NULL
+ * if no @media needed it. */
+static char *
+nscss_fix_media(const char *d, int32 len, int32 *out_len)
+{
+	nscss_buf b = { NULL, 0, 0 };
+	int32 i = 0, from = 0;
+
+	while (i < len) {
+		char c = d[i];
+
+		if ((c == '/' && i + 1 < len && d[i + 1] == '*') || c == '"' || c == '\'') {
+			i = nscss_skip(d, len, i);
+			continue;
+		}
+		if (c == '@' && i + 6 < len && !strncasecomp(d + i, "@media", 6) &&
+			isspace((unsigned char) d[i + 6])) {
+			int32 j = i + 6;
+			char *list, *m;
+
+			while (j < len && d[j] != '{' && d[j] != ';' && d[j] != '}')
+				j++;
+			if (j >= len || d[j] != '{') {
+				i = j;
+				continue;
+			}
+			list = (char *) XP_ALLOC(j - i - 6 + 1);
+			if (!list)
+				break;
+			XP_MEMCPY(list, d + i + 6, j - i - 6);
+			list[j - i - 6] = '\0';
+			m = nscss_media_list(list);
+			if (m) {
+				nscss_buf_add(&b, d + from, i + 6 - from);
+				nscss_buf_add(&b, " ", 1);
+				nscss_buf_add(&b, m, XP_STRLEN(m));
+				nscss_buf_add(&b, " ", 1);
+				from = j;
+				XP_FREE(m);
+			}
+			XP_FREE(list);
+			i = j + 1;
+			continue;
+		}
+		i++;
+	}
+	if (!b.buf)
+		return NULL;
+	nscss_buf_add(&b, d + from, len - from);
+	*out_len = b.len;
+	return b.buf;
+}
+
+/* A stray '}' outside any block (a selector that lost its '{'): browsers
+ * read it as part of the next rule's selector and drop that rule; libcss
+ * loses its place and drops the rest of the sheet.  Drop the statement it
+ * ends and the rule after it, as browsers do.  Allocated, or NULL if the
+ * sheet has none. */
+static char *
+nscss_drop_stray(const char *d, int32 len, int32 *out_len)
+{
+	nscss_buf b = { NULL, 0, 0 };
+	int32 i = 0, from = 0, depth = 0, stmt = 0;
+
+	while (i < len) {
+		char c = d[i];
+
+		if ((c == '/' && i + 1 < len && d[i + 1] == '*') || c == '"' || c == '\'') {
+			i = nscss_skip(d, len, i);
+			continue;
+		}
+		if (c == '{')
+			depth++;
+		else if (c == '}' && depth > 0) {
+			if (--depth == 0)
+				stmt = i + 1;
+		} else if (c == '}') {
+			/* the rule after it: to the end of its block */
+			int32 j = i + 1, inner = 0;
+
+			while (j < len) {
+				char e = d[j];
+
+				if ((e == '/' && j + 1 < len && d[j + 1] == '*') ||
+					e == '"' || e == '\'') {
+					j = nscss_skip(d, len, j);
+					continue;
+				}
+				j++;
+				if (e == '{')
+					inner++;
+				else if (e == '}' && inner > 0 && --inner == 0)
+					break;
+			}
+			nscss_buf_add(&b, d + from, stmt - from);
+			from = stmt = i = j;
+			continue;
+		} else if (c == ';' && depth == 0)
+			stmt = i + 1;
+		i++;
+	}
+	if (!b.buf)
+		return NULL;
+	nscss_buf_add(&b, d + from, len - from);
+	*out_len = b.len;
+	return b.buf;
+}
+
 /* DATA with what libcss cannot read made readable (@layer unwrapped, var()
  * resolved): allocated, or NULL if there was nothing to do. */
 static char *
@@ -1124,11 +1234,22 @@ nscss_vars_resolve(NSCSS_Doc *doc, const char *data, int32 len, int32 *out_len)
 {
 	nscss_buf b = { NULL, 0, 0 };
 	int32 i, ulen = 0;
-	char *u = nscss_unlayer(data, len, &ulen);
+	char *u = nscss_unlayer(data, len, &ulen), *t;
+	int32 tlen = 0;
 
 	if (u) {
 		data = u;
 		len = ulen;
+	}
+	if ((t = nscss_drop_stray(data, len, &tlen)) != NULL) {
+		XP_FREEIF(u);
+		data = u = t;
+		len = ulen = tlen;
+	}
+	if ((t = nscss_fix_media(data, len, &tlen)) != NULL) {
+		XP_FREEIF(u);
+		data = u = t;
+		len = ulen = tlen;
 	}
 	for (i = 0; i + 4 <= len; i++)
 		if (!strncasecomp(data + i, "var(", 4))
@@ -1208,6 +1329,77 @@ NSCSS_SetViewport(NSCSS_Doc *doc, int32 width, int32 height)
 	doc->media.grid = false;
 }
 
+/* A media list libcss can read: it rejects the whole list over one old
+ * media type (media="screen, projection").  Queries on types it does not
+ * know are left out (they never match a screen); none left: "not all".
+ * Allocated, or NULL to use MEDIA as it is. */
+static char *
+nscss_media_list(const char *media)
+{
+	static const char *const known[] = { "all", "screen", "print", "speech", NULL };
+	const char *p = media, *q;
+	char *out;
+	XP_Bool changed = FALSE;
+	int32 n = 0;
+
+	if (!media || !*media)
+		return NULL;
+	out = (char *) XP_ALLOC(XP_STRLEN(media) + 8);
+	if (!out)
+		return NULL;
+	while (*p) {
+		const char *w;
+		int32 wl, k;
+		XP_Bool keep = FALSE;
+
+		while (*p == ',' || isspace((unsigned char) *p))
+			p++;
+		if (!*p)
+			break;
+		for (q = p; *q && *q != ','; q++)
+			;
+		/* its media type: the first word, after "only" or "not" */
+		w = p;
+		for (;;) {
+			for (wl = 0; w + wl < q && (isalnum((unsigned char) w[wl]) ||
+										w[wl] == '-'); wl++)
+				;
+			if ((wl == 4 && !strncasecomp(w, "only", 4)) ||
+				(wl == 3 && !strncasecomp(w, "not", 3))) {
+				w += wl;
+				while (w < q && isspace((unsigned char) *w))
+					w++;
+				continue;
+			}
+			break;
+		}
+		if (wl == 0)
+			keep = TRUE;			/* "(min-width: ...)" */
+		for (k = 0; !keep && known[k]; k++)
+			if ((int32) XP_STRLEN(known[k]) == wl &&
+				!strncasecomp(w, known[k], wl))
+				keep = TRUE;
+		if (keep) {
+			if (n)
+				out[n++] = ',';
+			XP_MEMCPY(out + n, p, q - p);
+			n += q - p;
+		} else
+			changed = TRUE;
+		p = q;
+	}
+	if (!changed) {
+		XP_FREE(out);
+		return NULL;
+	}
+	if (n == 0) {
+		XP_STRCPY(out, "not all");
+		return out;
+	}
+	out[n] = '\0';
+	return out;
+}
+
 void
 NSCSS_AddSheet(NSCSS_Doc *doc, const char *url, const char *charset,
 			   const char *media, const char *data, int32 len)
@@ -1252,8 +1444,13 @@ NSCSS_AddSheet(NSCSS_Doc *doc, const char *url, const char *charset,
 	}
 	doc->sheet_hashes[doc->n_sheets] = h;
 	doc->sheets[doc->n_sheets++] = s;
-	css_select_ctx_append_sheet(doc->ctx, s, CSS_ORIGIN_AUTHOR,
-								media && *media ? media : NULL);
+	{
+		char *m = nscss_media_list(media);
+
+		css_select_ctx_append_sheet(doc->ctx, s, CSS_ORIGIN_AUTHOR,
+									m ? m : media && *media ? media : NULL);
+		XP_FREEIF(m);
+	}
 }
 
 NSCSS_Node *
@@ -1701,16 +1898,19 @@ nscss_is_block(NSCSS_Node *node, uint8_t display)
 static void nscss_export_box(NSCSS_Doc *doc, NSCSS_Node *node,
 							 const css_computed_style *st, StyleStruct *style);
 
-/* A form control made fully transparent: pages draw their own widget
- * over it (menus' checkboxes, custom selects); layout's would show. */
+/* Made fully transparent: a form control (pages draw their own widget
+ * over it: menus' checkboxes, custom selects), or a box out of the flow
+ * (a dropdown menu faded out until hover).  Layout would show them. */
 static XP_Bool
 nscss_invisible_control(NSCSS_Node *node, const css_computed_style *st)
 {
 	const char *n = lwc_string_data(node->name);
 	css_fixed op = INTTOFIX(1);
+	uint8_t pos = css_computed_position(st);
 
 	if (strcasecomp(n, "input") && strcasecomp(n, "select") &&
-		strcasecomp(n, "textarea") && strcasecomp(n, "button"))
+		strcasecomp(n, "textarea") && strcasecomp(n, "button") &&
+		pos != CSS_POSITION_ABSOLUTE && pos != CSS_POSITION_FIXED)
 		return FALSE;
 	if (css_computed_opacity(st, &op) != CSS_OPACITY_SET)
 		return FALSE;
@@ -2000,6 +2200,10 @@ nscss_export_box(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	}
 }
 
+static const char *const nscss_table_tags[] = {
+	"table", "caption", "thead", "tbody", "tfoot", "tr", "td", "th", NULL
+};
+
 /* A block that encloses its floats: overflow other than visible (a new
  * block formatting context), or a clearfix (an ::after with content that
  * clears).  Layout ends it below the floats that started inside it. */
@@ -2013,6 +2217,10 @@ nscss_encloses_floats(NSCSS_Node *node, const css_computed_style *st,
 		return;
 	d = css_computed_display_static(st);
 	if (d == CSS_DISPLAY_NONE || !nscss_is_block(node, d))
+		return;
+	/* table parts: their cells hold their floats already */
+	if (d == CSS_DISPLAY_TABLE || d == CSS_DISPLAY_TABLE_CELL ||
+		d == CSS_DISPLAY_TABLE_ROW || nscss_name_in(node, nscss_table_tags))
 		return;
 	if (after) {
 		const css_computed_content_item *items = NULL;
