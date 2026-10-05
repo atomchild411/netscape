@@ -158,7 +158,7 @@ menuItemGetCmdName(Widget w)
 				  NULL);
 	MenuSpec* spec = (MenuSpec*)userData;
 	
-	return spec ? spec->getCmdName() : "";
+	return spec ? spec->getCmdName() : (char *) "";
 }
 
 void

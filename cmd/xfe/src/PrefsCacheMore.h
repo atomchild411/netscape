@@ -68,5 +68,11 @@ private:
 	PrefsDataCacheMore           *m_prefsDataCacheMore;
 };
 
+/* Friend functions, declared for ordinary lookup too. */
+void prefsCacheMoreCb_ok(Widget, XtPointer, XtPointer);
+void prefsCacheMoreCb_cancel(Widget, XtPointer, XtPointer);
+void prefsCacheMoreCb_clearDisk(Widget, XtPointer, XtPointer);
+void prefsCacheMoreCb_clearMem(Widget, XtPointer, XtPointer);
+
 #endif /* _xfe_prefssslconfig_h */
 

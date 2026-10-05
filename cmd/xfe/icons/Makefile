@@ -195,7 +195,17 @@ $(ICONS_GEN_HDR): $(ICONLIST)
 		\mv -f $@.$$$$ $@; \
 	fi
 
+# A cross build cannot run mkicons (an IRIX program, linked with the image
+# library) on the build host: it takes icondata-cross.c, mkicons's output
+# made on IRIX for the Navigator-only icon set.  To remake that file, build
+# mkicons, then on IRIX, in this directory:
+#   $(OBJDIR)/mkicons -no-xfe-define - < $(OBJDIR)/iconanim.list > icondata-cross.c
+ifdef HOST_CC
+$(ICONS_GEN_SRC): icondata.h icondata-cross.c $(ICONS_GEN_HDR)
+	cp icondata-cross.c $@
+else
 $(ICONS_GEN_SRC): icondata.h $(ICONANIMLIST) $(MKICONS_EXE) $(ICONS_GEN_HDR)
 	$(MKICONS_EXE) -no-xfe-define - < $(ICONANIMLIST) > $@.$$$$ && mv $@.$$$$ $@
+endif
 
 $(LIBRARY): $(OBJS)

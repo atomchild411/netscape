@@ -192,6 +192,11 @@
      */
     typedef char Bool;
     typedef char XP_Bool;
+    /* Today's X headers (X11/Xdefs.h) typedef Bool as int unless this
+     * is defined. */
+#ifndef _XTYPEDEF_BOOL
+#define _XTYPEDEF_BOOL
+#endif
 #endif
 
 #if defined(XP_WIN)

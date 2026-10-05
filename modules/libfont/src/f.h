@@ -140,5 +140,6 @@ public:
 
   friend void free_fh_store(wfList *object, void *item);
 };
+void free_fh_store(wfList *object, void *item);
 #endif /* _f_H_ */
 

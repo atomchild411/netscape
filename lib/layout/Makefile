@@ -50,6 +50,14 @@ CSRCS		= bullet.c \
 		  laylayer.c \
 		  layrelay.c \
 		  laytrav.c \
+		  layfree.c \
+		  layimage.c \
+		  layout.c \
+		  laysel.c \
+		  laytable.c \
+		  laytags.c \
+		  laytext.c \
+		  layutil.c \
                   $(NULL)
 
 REQUIRES	= parse style js layer applet nspr security dbm img util jtools edtplug java hook pref libfont lay rdf network htmldlgs
@@ -61,16 +69,10 @@ REQUIRES	+= privacy
 EXPORTS		+= laylayer.h
 endif
 
+# The editor's own layout code; the rest of the engine is above (it was
+# listed here too, which left a build without EDITOR with no layout at all).
 ifdef EDITOR
 CSRCS		+= layedit.c \
-		  layfree.c \
-		  layimage.c \
-		  layout.c \
-		  laysel.c \
-		  laytable.c \
-		  laytags.c \
-		  laytext.c \
-		  layutil.c \
 		  $(NULL)
 
 CPPSRCS		= streams.cpp \

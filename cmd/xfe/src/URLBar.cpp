@@ -295,7 +295,7 @@ XFE_URLBar::_urlLabelResources[] =
 		sizeof(XmString),
 		XtOffset(XFE_URLBar *, m_editedLabelString),
 		XtRString,
-		"Error!"
+		(XtPointer) "Error!"
 	},
 	{
 		"uneditedLabelString",
@@ -304,7 +304,7 @@ XFE_URLBar::_urlLabelResources[] =
 		sizeof(XmString),
 		XtOffset(XFE_URLBar *, m_uneditedLabelString),
 		XtRString,
-		"Error!" 
+		(XtPointer) "Error!" 
 	},
 	{
 		"netsiteLabelString",
@@ -313,7 +313,7 @@ XFE_URLBar::_urlLabelResources[] =
 		sizeof(XmString),
 		XtOffset(XFE_URLBar *, m_netsiteLabelString),
 		XtRString,
-		"Error!" 
+		(XtPointer) "Error!" 
 	}
 };
 

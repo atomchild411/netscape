@@ -96,7 +96,7 @@ xfe_path_exists(const char * path)
   XP_Bool     result = FALSE;
   int         code;
   struct stat sbuf;
-  const       STAT_SUCCESS = 0;
+  const int   STAT_SUCCESS = 0;
 
   if (path)
 	{

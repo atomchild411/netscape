@@ -77,5 +77,13 @@ private:
 	PrefsDataGeneralAppl         *m_prefsDataGeneralAppl;
 };
 
+/* Friend functions, declared for ordinary lookup too. */
+void prefsApplEditCb_ok(Widget, XtPointer, XtPointer);
+void prefsApplEditCb_cancel(Widget, XtPointer, XtPointer);
+void prefsApplEditCb_toggleHandledBy(Widget, XtPointer, XtPointer);
+void prefsApplEditCb_browseAppl(Widget, XtPointer, XtPointer);
+void prefsApplEditCb_setHandledBy(Widget, XtPointer, XtPointer);
+void prefsApplEditCb_selectPlugin(Widget, XtPointer, XtPointer);
+
 #endif /* _xfe_prefsappledit_h */
 

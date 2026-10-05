@@ -71,7 +71,7 @@ static sigset_t timer_set;
  * an int.
  */
 
-#if defined(SOLARIS) \
+#if defined(SOLARIS) || defined(IRIX) \
 	|| (defined(LINUX) && defined(_REENTRANT) \
         && !(defined(__GLIBC__) && __GLIBC__ >= 2))
 #define _PR_HAVE_GETPROTO_R

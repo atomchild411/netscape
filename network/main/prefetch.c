@@ -37,8 +37,8 @@ PRIVATE XP_List* prefetch_list = 0;
 #define USER_SETTING 0.0 /* TODO Change this to read off of the prefs.js file */
 
 MODULE_PRIVATE void pre_FreePrefetchURLStruct(PrefetchURLStruct *pus);
-MODULE_PRIVATE Bool pre_OKToPrefetch(char* url);
-MODULE_PRIVATE void pre_Finished(URL_Struct* url_struct, int status, MWContext* context);
+PRIVATE Bool pre_OKToPrefetch(char* url);
+PRIVATE void pre_Finished(URL_Struct* url_struct, int status, MWContext* context);
 
 PRIVATE XP_Bool pre_enabled = TRUE;
 PRIVATE int pre_LockNormalizeAndSort(); 

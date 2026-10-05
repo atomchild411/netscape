@@ -673,7 +673,12 @@ ifeq ($(OS_ARCH),IRIX)
 # should not be removed. SGI dynamically opens the library depending on
 # the setting of some resources (e.g. "useEnhancedFSB")
 #
+ifdef NS_USE_GCC
+# pkgsrc's Motif and X libraries: SGI's libSgm extends IRIX's own Motif only.
+OTHER_LIBS	= -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm -lpthread $(OS_LIBS)
+else
 OTHER_LIBS	= -lSgm $(MOTIFPATCH_LIB) -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm $(OS_LIBS)
+endif
 
 #
 # On Irix, tag the executable for use by the Indigo Magic Desktop.
@@ -688,7 +693,11 @@ endif
 # If we are using gtscc, we must use it as the linker, and we
 # can only build statically (no shared libs).
 #
+ifdef NS_USE_GCC
+CCLD		= $(CCC)
+else
 CCLD		= CC
+endif
 ifdef USE_GTSCC
 ifndef NO_GTSCC
 CCLD		= $(DIST)/bin/gtscc $(GTSCC_LD_OPTIONS) -gtsfile $(DEPTH)/config/$(OBJDIR)/db.gts -gtsrootdir $(DEPTH)

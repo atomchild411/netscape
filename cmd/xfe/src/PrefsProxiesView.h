@@ -80,5 +80,9 @@ private:
 	PrefsDataProxiesView         *m_prefsDataProxiesView;
 };
 
+/* Friend functions, declared for ordinary lookup too. */
+void prefsProxiesViewCb_ok(Widget, XtPointer, XtPointer);
+void prefsProxiesViewCb_cancel(Widget, XtPointer, XtPointer);
+
 #endif /* _xfe_prefsproxiesview_h */
 

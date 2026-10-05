@@ -243,5 +243,9 @@ public:
 	virtual char* getObjectType(XFE_View*) = 0;
 };
 
+/* Friend functions, declared for ordinary lookup too. */
+XFE_Command* findCommand(XFE_CommandList*, CommandType);
+XFE_CommandList* registerCommand(XFE_CommandList*&, XFE_Command*);
+
 #endif /* _xfe_command_h */
 

@@ -249,7 +249,7 @@ fe_swatch_destroy_cb(Widget widget, XtPointer closure, XtPointer cbd)
 		XtReleaseGC(widget, gc);
 }
 
-static Widget
+Widget
 fe_CreateSwatch(Widget parent, char* name, Arg* args, Cardinal n)
 {
 	Widget    widget;

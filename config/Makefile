@@ -47,6 +47,14 @@ endif
 
 include $(DEPTH)/config/rules.mk
 
+# Cross builds: everything here runs on the build host while building.
+ifdef HOST_CC
+override CC	:= $(HOST_CC)
+override CCF	:= $(HOST_CC)
+override CFLAGS	:= -O -std=gnu89 -w -DXP_UNIX $(INCLUDES)
+override LDFLAGS :=
+endif
+
 ifeq ($(OS_ARCH)$(OS_RELEASE),SunOS4.1)
 INCLUDES	+= -I../nsprpub/pr/include/md
 endif

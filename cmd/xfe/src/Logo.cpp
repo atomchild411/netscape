@@ -706,8 +706,8 @@ XFE_Logo::tipStringCallback(Widget, XtPointer closure, XtPointer call_data)
 
 	if ( !cb_info ) return;
 
-	pref = ( cb_info->reason == XFE_DOCSTRING ) ? "toolbar.logo.doc_string" :
-		   ( cb_info->reason == XFE_TIPSTRING ) ? "toolbar.logo.tooltip" :
+	pref = ( cb_info->reason == XFE_DOCSTRING ) ? (char *) "toolbar.logo.doc_string" :
+		   ( cb_info->reason == XFE_TIPSTRING ) ? (char *) "toolbar.logo.tooltip" :
 		   (char *)NULL;
 
 	if ( pref && PREF_CopyConfigString(pref, &value) == PREF_OK ) {

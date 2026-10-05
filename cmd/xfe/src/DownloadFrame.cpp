@@ -89,7 +89,7 @@ XFE_StatReadWrite(const char *file_name, XP_Bool isFileP, XP_Bool existsP)
 	char*          p;
 	char*          base_name = (char *) XP_ALLOC(XP_STRLEN(file_name) + 1);
 	
-	p = XP_STRRCHR(file_name, '/');
+	p = (char *) XP_STRRCHR(file_name, '/');
 	
 	if (p) {
 		if (p == file_name) {

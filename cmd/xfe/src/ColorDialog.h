@@ -80,5 +80,11 @@ private:
 	Pixel      m_selectedPixel;
 };
 
+/* Friend functions, declared for ordinary lookup too. */
+void colorDialogCb_ok(Widget, XtPointer, XtPointer);
+void colorDialogCb_cancel(Widget, XtPointer, XtPointer);
+void colorDialogCb_destroy(Widget, XtPointer, XtPointer);
+void colorDialogCb_selectColor(Widget, XtPointer, XtPointer);
+
 #endif /* _xfe_colordialog_h */
 

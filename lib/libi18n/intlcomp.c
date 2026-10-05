@@ -38,7 +38,7 @@
 /*	Private Function Prototype */
 extern unsigned char lower_lookup_ascii[];
 #define INTL_SingleByteToLower(lower, ch)	((ch & 0x80) ? (lower[(ch & 0x7f)]) : (lower_lookup_ascii[ch]))
-MODULE_PRIVATE void INTL_DoubleByteToLower(DoubleByteToLowerMap *, unsigned char* , unsigned char* );
+PRIVATE void INTL_DoubleByteToLower(DoubleByteToLowerMap *, unsigned char* , unsigned char* );
 
 
 PRIVATE void intl_strip_CRLF(unsigned char* str)

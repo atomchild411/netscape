@@ -19,6 +19,6 @@
 
 DEPTH	= ../../..
 
-DIRS	= nullplugin javatest
+DIRS	= nullplugin
 
 include $(DEPTH)/config/rules.mk

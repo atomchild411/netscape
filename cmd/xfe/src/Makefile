@@ -351,7 +351,11 @@ $(OBJDIR)/commands.o: $(OBJDIR)/commands.c
 
 $(OBJDIR)/mkcommands: mkcommands.c
 	@$(MAKE_OBJDIR)
+ifdef HOST_CC
+	$(HOST_CC) -O -std=gnu89 -w -o $@ $<
+else
 	$(CCF) -o $@ $<
+endif
 
 
 # This rule is needed for 'make -j' to work since just about everything

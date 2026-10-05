@@ -34,7 +34,7 @@ COMPILER_TAG		= _gcc
 AS			= $(CC) -x assembler-with-cpp
 ODD_CFLAGS		= -Wall -Wno-format
 ifdef BUILD_OPT
-OPTIMIZER		= -O6
+OPTIMIZER		= -O2
 endif
 else
 CC			= cc
@@ -102,7 +102,11 @@ SHLIB_LD_OPTS		+= -32
 endif
 endif
 
+ifdef NS_USE_GCC
+MKSHLIB			= $(CC) -shared -Wl,-soname,$(@:$(OBJDIR)/%.so=%.so)
+else
 MKSHLIB			= $(LD) $(SHLIB_LD_OPTS) -rdata_shared -shared -soname $(@:$(OBJDIR)/%.so=%.so)
+endif
 
 HAVE_PURIFY		= 1
 

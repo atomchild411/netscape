@@ -102,7 +102,7 @@ XFE_DisplayFactory::getVisual()
         /* "*visualID" is special for a number of reasons... */
         static XtResource getVisual_res = { "visualID", "VisualID",
 				  XtRString, sizeof (String),
-				  0, XtRString, "default" };
+				  0, XtRString, (XtPointer) "default" };
   
         XtGetSubresources (m_toplevel, &str, (char *)fe_progname, "TopLevelShell",
 			   &getVisual_res, 1, 0, 0);
@@ -195,7 +195,7 @@ XFE_DisplayFactory::XFE_DisplayFactory(Widget toplevel)
   {
     String str = 0;
     static XtResource res = { "installColormap", XtCString, XtRString,
-			      sizeof (String), 0, XtRString, "guess" };
+			      sizeof (String), 0, XtRString, (XtPointer) "guess" };
     XtGetApplicationResources (m_toplevel, &str, &res, 1, 0, 0);
     if (!str || !*str || !XP_STRCASECMP (str, "guess"))
 #if 0

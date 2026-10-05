@@ -32,6 +32,15 @@ endif
 
 include $(MOD_DEPTH)/config/rules.mk
 
+# Cross builds: nsinstall runs on the build host while building.
+ifdef HOST_CC
+override CC	:= $(HOST_CC)
+override CFLAGS	:= -O -std=gnu89 -w -DXP_UNIX
+override LDFLAGS :=
+override OS_LIBS :=
+override EXTRA_LIBS :=
+endif
+
 # Redefine MAKE_OBJDIR for just this directory
 define MAKE_OBJDIR
 if test ! -d $(@D); then rm -rf $(@D); mkdir $(@D); fi

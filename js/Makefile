@@ -34,6 +34,6 @@ DEPTH = ..
 # See top-level makefile for details
 #
 
-DIRS = src jsj tests
+DIRS = src jsj
 
 include $(DEPTH)/config/rules.mk

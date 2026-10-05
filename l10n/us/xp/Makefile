@@ -45,6 +45,8 @@ $(TR69):	tr69.c
 	@$(MAKE_OBJDIR)
 ifeq ($(OS_ARCH),OS2)
 	$(CCF) -Fe $@ $<
+else ifdef HOST_CC
+	$(HOST_CC) -o $@ $<
 else
 	$(CC) -o $@ $<
 endif
@@ -159,26 +161,21 @@ about-java-lite.html:	splash-java.input
 #
 # Handle the rest of the HTML files.
 #
+# The sed scripts are given as separate -e expressions: a backslash-newline
+# inside a quoted script reaches the shell (and sed) as it is, and sed takes
+# "\<newline>" for the start of an address.  The .pc files (Windows resource
+# input, made with xemacs) are not built here.
 .html.h:
 	@echo generating $*.h from $<;					\
 	NAME=Netscape;							\
 	CLASS=Netscape;							\
 	RTMP=/tmp/nsrot$$$$;						\
 	$(RM) $*.h $*.pc;						\
-	sed    "s/@NAME@/$$NAME/g;					\
-		s/@CLASS@/$$CLASS/g;					\
-		s/@PROGNAME@/$(PROGNAME)/g"				\
-		< $< > $$RTMP;						\
-	$(TR69) < $$RTMP |						\
-	od -b |								\
-	sed    's/^[0-7][0-7]* *\(.*\)/\\\1/;				\
-		s/ /\\/g;						\
-		s/\(.*\)/ "\1"/;					\
-		s/^ *"\\"$$//' >> $*.h;					\
-	echo generating $*.pc from $<;					\
-	$(EMACS) -batch -q -l $(REAL_XPDIR)/html-to-pc.el		\
-		-f batch-html-to-pc $* $$RTMP $*.pc;			\
-	echo;								\
+	sed -e "s/@NAME@/$$NAME/g" -e "s/@CLASS@/$$CLASS/g"		\
+	    -e "s/@PROGNAME@/$(PROGNAME)/g" < $< > $$RTMP;		\
+	$(TR69) < $$RTMP | od -b |					\
+	sed -e 's/^[0-7][0-7]* *\(.*\)/\\\1/' -e 's/ /\\/g'		\
+	    -e 's/\(.*\)/ "\1"/' -e 's/^ *"\\"$$//' >> $*.h;		\
 	$(RM) $$RTMP
 
 .msg.h:
@@ -187,14 +184,11 @@ about-java-lite.html:	splash-java.input
 	CLASS=Netscape;							\
 	$(RM) $*.h;							\
 	RTMP=/tmp/nsrot$$$$;						\
-	sed    "s/@NAME@/$$NAME/g;					\
-		s/@CLASS@/$$CLASS/g;					\
-		s/@PROGNAME@/$(PROGNAME)/g"				\
-		< $< > $$RTMP;						\
-	$(TR69) '[\001-\272]' '[\106-\377]' < $$RTMP |			\
-	od -b | sed 's/^[0-7][0-7]* *\(.*\)/\\\1/;			\
-		s/ /\\/g;s/\(.*\)/ "\1"/;s/^ *"\\"$$//'			\
-	  >> $*.h;							\
+	sed -e "s/@NAME@/$$NAME/g" -e "s/@CLASS@/$$CLASS/g"		\
+	    -e "s/@PROGNAME@/$(PROGNAME)/g" < $< > $$RTMP;		\
+	$(TR69) '[\001-\272]' '[\106-\377]' < $$RTMP | od -b |		\
+	sed -e 's/^[0-7][0-7]* *\(.*\)/\\\1/' -e 's/ /\\/g'		\
+	    -e 's/\(.*\)/ "\1"/' -e 's/^ *"\\"$$//' >> $*.h;		\
 	$(RM) $$RTMP
 
 $(TARGETS):	Makefile

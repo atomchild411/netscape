@@ -53,9 +53,9 @@ public:
   Boolean  isImageLoaded();
   void     setCompleteCallback(completeCallbackPtr    callback, void * callbackData);
 
-  void XFE_RDFImage::RDFDisplayPixmap(IL_Pixmap * image, IL_Pixmap * mask, long int width, long int height);
-  void XFE_RDFImage::RDFNewPixmap(IL_Pixmap * image, Boolean isMask);
-  void XFE_RDFImage::RDFImageComplete(IL_Pixmap * image);
+  void RDFDisplayPixmap(IL_Pixmap * image, IL_Pixmap * mask, long int width, long int height);
+  void RDFNewPixmap(IL_Pixmap * image, Boolean isMask);
+  void RDFImageComplete(IL_Pixmap * image);
 
 
 private:

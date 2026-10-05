@@ -12,6 +12,9 @@
 
 #include <ncompat.h>
 
+/* IRIX 6.5's libc has snprintf and vsnprintf. */
+#if !defined(IRIX)
+
 #ifdef __STDC__
 #include <stdarg.h>
 #else
@@ -64,3 +67,5 @@ vsnprintf(str, n, fmt, ap)
 	return (vsprintf(str, fmt, ap));
 #endif
 }
+
+#endif /* !IRIX */

@@ -94,5 +94,6 @@ public:
 
   friend void free_fmi_attr_store (wfList *object, void *item);
 };
+void free_fmi_attr_store (wfList *object, void *item);
 
 #endif /* _fmi_H_ */

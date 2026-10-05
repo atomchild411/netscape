@@ -36,7 +36,7 @@ OS_LIBS			=
 
 PLATFORM_FLAGS		= -DIRIX -DIRIX$(OS_RELEASE)$(subst .,_,$(OS_VERSION))
 MOVEMAIL_FLAGS		=
-PORT_FLAGS		= -DSVR4 -DHAVE_LCHOWN -DHAVE_SIGNED_CHAR -DHAVE_FILIO_H -DHAS_PGNO_T -DMITSHM -DHAVE_WAITID -DNEED_VBASE -DNEED_SYS_TIME_H -DHAVE_SYSTEMINFO_H -DNO_JNI_STUBS -D_MIPS_SIM_ABI32
+PORT_FLAGS		= -DSVR4 -DHAVE_LCHOWN -DHAVE_SIGNED_CHAR -DHAVE_FILIO_H -DHAS_PGNO_T -DMITSHM -DHAVE_WAITID -DNEED_VBASE -DNEED_SYS_TIME_H -DHAVE_SYSTEMINFO_H -DNO_JNI_STUBS
 PDJAVA_FLAGS		=
 
 OS_CFLAGS		= $(PLATFORM_FLAGS) $(PORT_FLAGS) $(MOVEMAIL_FLAGS)
@@ -69,10 +69,12 @@ ifeq ($(OS_RELEASE),6)
 # The "-woff 3247" silences complaints about the "#pragma segment"
 # stuff strewn all over db (apparently for Macintoshes).
 #
-NO_NOISE		= -woff 131
-PLATFORM_FLAGS		+= -multigot -Wl,-nltgot,170
 PORT_FLAGS		+= -DNO_UINT32_T -DNO_INT64_T -DNEED_BSD_TYPES
+ifndef NS_USE_GCC
+NO_NOISE		= -woff 131
+PLATFORM_FLAGS		+= -32 -multigot -Wl,-nltgot,170
 SHLIB_LD_OPTS		= -no_unresolved
+endif
 ifeq ($(AWT_11),1)
 JAVAC_ZIP		= $(NS_LIB)/rt.jar:$(NS_LIB)/dev.jar:$(NS_LIB)/i18n.jar:$(NS_LIB)/tiny.jar
 endif
@@ -119,13 +121,17 @@ ZIP_PROG		= $(NS_BIN)zip
 ######################################################################
 
 ifdef NS_USE_GCC
-PLATFORM_FLAGS		+= -Wall -Wno-format
+# Pre-standard C++ headers (<iostream.h>) for today's C++ libraries.
+OS_INCLUDES		+= -I$(DEPTH)/config/cxxcompat
+# clang (or gcc) for n32: the o32 "-32" and MIPSpro's -multigot, -fullwarn
+# and -xansi do not apply.
+PLATFORM_FLAGS		+= -Wno-format
 ASFLAGS			+= -x assembler-with-cpp
 ifdef BUILD_OPT
-OPTIMIZER		= -O6
+OPTIMIZER		= -O2
 endif
 else
-PLATFORM_FLAGS		+= -32 -fullwarn -xansi -DIRIX_STARTUP_SPEEDUPS
+PLATFORM_FLAGS		+= -fullwarn -xansi -DIRIX_STARTUP_SPEEDUPS
 ifdef BUILD_OPT
 OPTIMIZER		= -O -Olimit 4000
 endif
@@ -135,10 +141,14 @@ ifndef NO_MDUPDATE
 MDUPDATE_FLAGS		= -MDupdate $(DEPENDENCIES)
 endif
 
+ifeq ($(USE_PTHREADS),1)
+PORT_FLAGS		+= -D_REENTRANT -D_SGI_MP_SOURCE -D_PR_PTHREADS
+else
 ifeq ($(USE_KERNEL_THREADS),1)
 PORT_FLAGS		+= -DHW_THREADS -D_SGI_MP_SOURCE
 else
 PORT_FLAGS		+= -DSW_THREADS
+endif
 endif
 
 #
@@ -165,6 +175,15 @@ HAVE_PURIFY		= 1
 MUST_BOOTLEG_ALLOCA	= 1
 BUILD_UNIX_PLUGINS	= 1
 
+ifdef NS_USE_GCC
+MKSHLIB			= $(CC) -shared -Wl,-soname,$(@:$(OBJDIR)/%.so=%.so)
+DSO_CFLAGS		= -fPIC
+DSO_LDOPTS		= -shared
+DSO_LDFLAGS		=
+ifdef DSO_BACKEND
+DSO_LDOPTS		+= -Wl,-soname,$(DSO_NAME)
+endif
+else
 MKSHLIB			= $(LD) $(NO_NOISE) $(SHLIB_LD_OPTS) -shared -soname $(@:$(OBJDIR)/%.so=%.so)
 
 DSO_LDOPTS		= -elf -shared -all
@@ -172,5 +191,6 @@ DSO_LDFLAGS		= -nostdlib -L/lib -L/usr/lib  -L/usr/lib -lXm -lXt -lX11 -lgen
 
 ifdef DSO_BACKEND
 DSO_LDOPTS		+= -soname $(DSO_NAME)
+endif
 endif
 

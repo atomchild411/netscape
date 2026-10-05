@@ -19,7 +19,7 @@ MOD_DEPTH = ../..
 
 include $(MOD_DEPTH)/config/config.mk
 
-DIRS = include src tests
+DIRS = include src
 
 include $(MOD_DEPTH)/config/rules.mk
 

@@ -452,5 +452,8 @@ void xfe_ExecuteCommand(XFE_Frame* frame,
 						XFE_CommandInfo* = NULL);
 
 
+/* Friend functions, declared for ordinary lookup too. */
+void XFE_Frame_busy_timeout(XtPointer, XtIntervalId*);
+
 #endif /* _xfe_frame_h */
 

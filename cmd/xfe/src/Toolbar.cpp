@@ -66,7 +66,7 @@ XFE_Toolbar::m_user_commandResources[] =
 		sizeof(String),
 		XtOffset(XFE_Toolbar *, m_user_commandName),
 		XmRString,
-		"Error"
+		(XtPointer) "Error"
 	},
 	{
 		"commandData",

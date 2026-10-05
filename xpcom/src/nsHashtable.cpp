@@ -152,5 +152,5 @@ nsHashtable * nsHashtable::Clone() {
 }
 
 void nsHashtable::Enumerate(nsHashtableEnumFunc aEnumFunc) {
-  PL_HashTableEnumerateEntries(hashtable, _hashEnumerate, aEnumFunc);
+  PL_HashTableEnumerateEntries(hashtable, _hashEnumerate, (void *) aEnumFunc);
 }

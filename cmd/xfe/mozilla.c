@@ -2487,6 +2487,7 @@ main
   }
 #endif
 
+#ifndef _PR_PTHREADS	/* local-threads NSPR only (uxwrap.c) */
  {
  	extern int PR_XGetXtHackFD(void);
  	int fd;
@@ -2525,6 +2526,7 @@ main
   	(void) XtAppAddTimeOut(fe_XtAppContext, 500L, dummyTimerProc, NULL); 
 #endif /*XFE_XLOCK_FD_TIMER_HACK*/
    }
+#endif /* !_PR_PTHREADS */
 
   /* For xxx stuff... */
   fe_dpy_kludge = dpy;
@@ -3382,10 +3384,12 @@ main
 
   fe_command_line_done = True;
 
+#ifndef _PR_PTHREADS
   {
     extern void PR_SetXtHackOkayToReleaseXLockFn(int (*fn)(void));
     PR_SetXtHackOkayToReleaseXLockFn(fe_xt_hack_okayToReleaseXLock);
   }
+#endif
 
   while (1)
     fe_EventLoop ();
