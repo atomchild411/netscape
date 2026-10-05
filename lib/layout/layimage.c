@@ -48,7 +48,9 @@ extern int MK_OUT_OF_MEMORY;
 
 #define IMAGE_DEF_DIM			50
 #define IMAGE_DEF_BORDER		0
-#define IMAGE_DEF_ANCHOR_BORDER		2
+/* No border around a linked image unless BORDER= asks for one: what
+ * pages expect today (Netscape drew 2 pixels in the link colour). */
+#define IMAGE_DEF_ANCHOR_BORDER		0
 #define IMAGE_DEF_VERTICAL_SPACE	0
 #define IMAGE_DEF_HORIZONTAL_SPACE	0
 #define IMAGE_DEF_FLOAT_HORIZONTAL_SPACE	3
