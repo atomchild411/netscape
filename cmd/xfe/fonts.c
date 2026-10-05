@@ -1163,6 +1163,20 @@ fe_LoadFont(MWContext *context, int16 *charset, char *familyName,
 
 	dpy = XtDisplay(CONTEXT_WIDGET(context));
 
+	/* A point size (a style sheet's font-size) in a charset drawn with
+	 * a font group (UTF-8, the CJK sets): load the group for it directly.
+	 * The family's size table holds the HTML sizes; a group font loaded
+	 * for a point size cached there would be used for the HTML size
+	 * nearest to it (a 28px heading's font for body text). */
+	if (points > 0 &&
+	    fe_CharSetInfoArray[charsetID].type == FE_FONT_TYPE_GROUP)
+	{
+		font = fe_LoadFontGroup(context, familyName, points, sizeNum,
+		                        fontmask, charsetID, pitch, faceNum, dpy);
+		if (font)
+			return font;
+	}
+
 	family = NULL;
 	if (familyName && *familyName)
 	{
@@ -1178,8 +1192,8 @@ fe_LoadFont(MWContext *context, int16 *charset, char *familyName,
 		/* We blew the font lookup, falling back to default. */
 		family = fe_GetFontFamily(*charset, pitch);
 
-        /* Invalidate the point size, I can't read it. */
-		points = 0;
+		/* Keep a point size (from a style sheet's font-size): the
+		 * default family is matched to it below like any other. */
 
 		if (!family)
 		{
@@ -3382,8 +3396,23 @@ fe_SetDefaultFontSettings(Display *dpy)
 				}
 				if ((!size) && family->numberOfPointSizes)
 				{
-					size = &family->pointSizes
-						[(family->numberOfPointSizes+1)/2-1];
+					/* the size nearest 12 points: the middle of the list
+					 * is right for the usual bitmap sizes, but 18 points
+					 * for the Unicode (UTF-8) pseudo fonts' 8-72 */
+					int best = (family->numberOfPointSizes+1)/2-1;
+					double best_dist = 1E+36;
+
+					for (m = 0; m < family->numberOfPointSizes; m++)
+					{
+						double d = family->pointSizes[m].size - 120.0;
+
+						if (family->pointSizes[m].size > 0 && d * d < best_dist)
+						{
+							best_dist = d * d;
+							best = m;
+						}
+					}
+					size = &family->pointSizes[best];
 					size->selected = 1;
 				}
 
@@ -7145,7 +7174,11 @@ fe_LoadUnicodeFont(void *not_used, char *familyName,
 		familyName = unicodeFamily->family;
 	}
     unicodeSize = unicodeFamily->htmlSizes[sizeNum-1];
-	pixelSize = fe_UnicodePointToPixelSize(dpy, unicodeSize->size);
+	/* sizes are in decipoints */
+	if (points > 0)
+		pixelSize = fe_UnicodePointToPixelSize(dpy, points * 10);
+	else
+		pixelSize = fe_UnicodePointToPixelSize(dpy, unicodeSize->size);
     ufont = fe_LoadUnicodeFontByPixelSize(not_used, familyName, 
     				pixelSize, fontmask, charset, pitch, faceNum, dpy);
 
