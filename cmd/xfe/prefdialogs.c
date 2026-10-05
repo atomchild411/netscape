@@ -778,9 +778,9 @@ fe_VerifyDiskCache (MWContext *context)
 	}
       else
 	{
-	  /* Suceeded. */
-	  PR_snprintf (message, sizeof (message),
-			fe_globalData.created_cache_dir_message, file);
+	  /* Suceeded: made quietly (it used to report each new directory,
+	     twice on a first start, in an error dialog). */
+	  *message = 0;
 	}
     }
   else if (! (st.st_mode & S_IFDIR))
@@ -848,9 +848,9 @@ fe_VerifyDiskCacheExistence (MWContext *context, char * cache_directory)
 	}
       else
 	{
-	  /* Suceeded. */
-	  PR_snprintf (message, sizeof (message),
-			fe_globalData.created_cache_dir_message, file);
+	  /* Suceeded: made quietly (it used to report each new directory,
+	     twice on a first start, in an error dialog). */
+	  *message = 0;
 	}
     }
   else if (! (st.st_mode & S_IFDIR))

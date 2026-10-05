@@ -85,9 +85,11 @@ $(LIBRARY): $(OBJS)
 
 unix/unixpref.c: unix/jsbuffer.h
  
+# The profile directory in the default paths (unix.js: ~/.netscape/...) is
+# NS_PROFILE_DIR (config.mk).
 unix/jsbuffer.h: Makefile $(CONFIG_FILES)
 	@echo "/* This is an automatically generated file */" > $@
 	@echo >> $@
 	@echo "static char* pref_init_buffer = " >> $@
-	@cat $(CONFIG_FILES) | sed 's/\\/\\\\/g' | sed 's/\\r/\\n/' | sed 's/\"/\\\"/g' | sed 's/^M//g' | sed 's/^/"/' | sed 's/$$/\\n"/' >> $@
+	@cat $(CONFIG_FILES) | sed 's|~/\.netscape/|~/$(NS_PROFILE_DIR)/|g' | sed 's/\\/\\\\/g' | sed 's/\\r/\\n/' | sed 's/\"/\\\"/g' | sed 's/^M//g' | sed 's/^/"/' | sed 's/$$/\\n"/' >> $@
 	@echo \; >> $@
