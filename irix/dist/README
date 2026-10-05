@@ -23,4 +23,7 @@ https://github.com/atomchild411/pkgsrc (branch irix).
 
 Licenses: licenses/ -- the Netscape Public License 1.0 for Navigator;
 OpenSSL (Apache License 2.0) and LLVM's libc++ (Apache License 2.0 with
-LLVM exception) are linked in; cacert.pem is from Mozilla (MPL 2.0).
+LLVM exception) are linked in, as are QuickJS (JavaScript), NetSurf's
+libcss, libdom, libhubbub, libparserutils and libwapcaplet (style sheets
+and the DOM), all MIT licence, and nanosvg (SVG images, zlib licence);
+cacert.pem is from Mozilla (MPL 2.0).
