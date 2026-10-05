@@ -3580,6 +3580,8 @@ net_http_tls_kick(ActiveEntry *ce, HTTPConData *cd)
     if(!cd->secure || !cd->connection || !cd->connection->sock)
         return;
     pending = NET_TLS_Pending(cd->connection->sock) > 0;
+    NET_TLS_Note(cd->connection->sock, "http pause: state", (long) cd->next_state);
+    NET_TLS_Note(cd->connection->sock, "http pause: pending", (long) pending);
     if(pending && !cd->calling_netlib_all_the_time)
       {
         NET_SetCallNetlibAllTheTime(ce->window_id, "mkhttp");

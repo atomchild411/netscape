@@ -20,6 +20,7 @@
 #include "prmem.h"
 #include "plstr.h"
 #include "prprf.h"
+#include "prinrval.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -42,23 +43,36 @@ typedef struct NetTLS {
 
 static SSL_CTX *net_tls_ctx = NULL;
 static int net_tls_debug = -1;
+static FILE *net_tls_logf = NULL;
 
-/* NETSCAPE_NET_DEBUG=1 in the environment: log the handshake to stderr. */
+/* NETSCAPE_NET_DEBUG in the environment: log the handshake to stderr, or to
+ * the file it names if it is a path (with every read, write and poll too:
+ * what a stalled transfer was waiting for). */
 static void
 net_tls_log(const char *fmt, ...)
 {
 	va_list ap;
+	FILE *f;
 
-	if (net_tls_debug < 0)
-		net_tls_debug = getenv("NETSCAPE_NET_DEBUG") != NULL;
+	if (net_tls_debug < 0) {
+		const char *e = getenv("NETSCAPE_NET_DEBUG");
+		net_tls_debug = e != NULL;
+		if (e && *e == '/')
+			net_tls_logf = fopen(e, "a");
+	}
 	if (!net_tls_debug)
 		return;
+	f = net_tls_logf ? net_tls_logf : stderr;
 	va_start(ap, fmt);
-	fputs("tls: ", stderr);
-	vfprintf(stderr, fmt, ap);
-	fputc('\n', stderr);
+	fprintf(f, "tls %lu: ", (unsigned long) PR_IntervalToMilliseconds(PR_IntervalNow()));
+	vfprintf(f, fmt, ap);
+	fputc('\n', f);
+	fflush(f);
 	va_end(ap);
 }
+
+/* Per-read logging only when logging to a file. */
+#define NET_TLS_TRACE(args)	do { if (net_tls_logf) net_tls_log args; } while (0)
 static PRDescIdentity net_tls_identity = PR_INVALID_IO_LAYER;
 static PRIOMethods net_tls_methods;
 
@@ -123,10 +137,16 @@ net_tls_read(PRFileDesc *fd, void *buf, PRInt32 amount)
 {
 	NetTLS *tls = (NetTLS *) fd->secret;
 
+	PRInt32 rv;
+
 	if (amount <= 0)
 		return 0;
 	errno = 0;
-	return net_tls_io_result(tls, SSL_read(tls->ssl, buf, amount));
+	rv = net_tls_io_result(tls, SSL_read(tls->ssl, buf, amount));
+	NET_TLS_TRACE(("%s read %ld -> %ld (err %d), pending %d", tls->host,
+				   (long) amount, (long) rv, rv < 0 ? PR_GetError() : 0,
+				   SSL_pending(tls->ssl)));
+	return rv;
 }
 
 static PRInt32 PR_CALLBACK
@@ -134,10 +154,14 @@ net_tls_write(PRFileDesc *fd, const void *buf, PRInt32 amount)
 {
 	NetTLS *tls = (NetTLS *) fd->secret;
 
+	PRInt32 rv;
+
 	if (amount <= 0)
 		return 0;
 	errno = 0;
-	return net_tls_io_result(tls, SSL_write(tls->ssl, buf, amount));
+	rv = net_tls_io_result(tls, SSL_write(tls->ssl, buf, amount));
+	NET_TLS_TRACE(("%s write %ld -> %ld", tls->host, (long) amount, (long) rv));
+	return rv;
 }
 
 static PRInt32 PR_CALLBACK
@@ -171,6 +195,7 @@ net_tls_poll(PRFileDesc *fd, PRInt16 in_flags, PRInt16 *out_flags)
 	*out_flags = 0;
 	if ((in_flags & PR_POLL_READ) && tls->handshake_done
 		&& SSL_pending(tls->ssl) > 0) {
+		NET_TLS_TRACE(("%s poll: %d pending", tls->host, SSL_pending(tls->ssl)));
 		*out_flags = PR_POLL_READ;
 		return in_flags;
 	}
@@ -184,6 +209,7 @@ net_tls_close(PRFileDesc *fd)
 	PRStatus status;
 
 	if (tls) {
+		NET_TLS_TRACE(("%s close", tls->host));
 		if (tls->handshake_done)
 			(void) SSL_shutdown(tls->ssl);	/* best effort, non-blocking */
 		SSL_free(tls->ssl);
@@ -348,6 +374,14 @@ NET_TLS_Handshake(PRFileDesc *sock, XP_Bool *want_write, char **error_msg)
 	}
 	net_tls_log("%s", *error_msg ? *error_msg : "(no message)");
 	return MK_UNABLE_TO_CONNECT;
+}
+
+MODULE_PRIVATE void
+NET_TLS_Note(PRFileDesc *sock, const char *what, long value)
+{
+	NetTLS *tls = net_tls_of(sock);
+
+	NET_TLS_TRACE(("%s %s %ld", tls ? tls->host : "?", what, value));
 }
 
 MODULE_PRIVATE XP_Bool

@@ -28,6 +28,9 @@ extern int NET_TLS_Wrap(PRFileDesc *sock, const char *host, char **error_msg);
 extern int NET_TLS_Handshake(PRFileDesc *sock, XP_Bool *want_write,
 							 char **error_msg);
 
+/* With NETSCAPE_NET_DEBUG=/file: log WHAT and VALUE for SOCK. */
+extern void NET_TLS_Note(PRFileDesc *sock, const char *what, long value);
+
 /* Is SOCK a TLS socket? */
 extern XP_Bool NET_TLS_IsTLS(PRFileDesc *sock);
 
