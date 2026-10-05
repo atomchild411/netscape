@@ -87,12 +87,18 @@ typedef struct qjs_Dom {
 	XP_Bool			user_event;		/* a click or key since the last one */
 	XP_Bool			in_render;		/* our layout is under way */
 	XP_Bool			module_scripts;	/* the page has <script type=module> */
+	/* form fields of the current layout, by element (value, checked ...
+	 * live in layout's form elements): emptied when layout starts over */
+	struct { dom_node *node; LO_FormElementStruct *fe; } *fields;
+	uint32			nfields, fcap;
+	MWContext		*context;
 } qjs_Dom;
 
 static JSClassID qjs_node_class;
 
 static void qjs_dom_free_wrappers(qjs_Dom *dom);
 static JSValue qjs_wrap(JSContext *cx, dom_node *node);
+static LO_FormElementStruct *qjs_field_of(qjs_Dom *dom, dom_node *node);
 
 /* ---- strings ------------------------------------------------------------ */
 
@@ -239,6 +245,7 @@ qjs_dom_free(qjs_Dom *dom)
 	for (i = 0; i < dom->nnamed; i++)
 		dom_node_unref(dom->named[i]);
 	XP_FREEIF(dom->named);
+	XP_FREEIF(dom->fields);
 	if (dom->cursor)
 		dom_node_unref(dom->cursor);
 	if (dom->current_script)
@@ -879,6 +886,8 @@ LM_DomTag(MWContext *context, PA_Tag *tag)
 	if (!decoder)
 		return;
 	dom = qjs_dom_of(decoder);
+	if (dom && (dom->resize_pending || dom->doc_id != XP_DOCID(context)))
+		dom->nfields = 0;		/* layout starts over: its form elements go */
 	if (dom && dom->resize_pending) {
 		if (getenv("QJS_DOM_TRACE"))
 			qjs_Log("dom: remapping the laid out document");
@@ -959,7 +968,39 @@ ET_ReflectFormElement(MWContext *context, void *form,
 		return;
 	form_element->mocha_object = (JSObject *) tag->dom_node;
 	qjs_dom_hold(dom, (dom_node *) tag->dom_node);
+	dom->context = context;
+	{
+		uint32 i;
+		for (i = 0; i < dom->nfields; i++)
+			if (dom->fields[i].node == (dom_node *) tag->dom_node)
+				break;
+		if (i == dom->nfields) {
+			if (dom->nfields == dom->fcap) {
+				uint32 cap = dom->fcap ? dom->fcap * 2 : 32;
+				void *a = XP_REALLOC(dom->fields, cap * sizeof *dom->fields);
+				if (!a)
+					return;
+				dom->fields = a;
+				dom->fcap = cap;
+			}
+			dom->nfields++;
+		}
+		dom->fields[i].node = (dom_node *) tag->dom_node;
+		dom->fields[i].fe = form_element;
+	}
 }
+
+static LO_FormElementStruct *
+qjs_field_of(qjs_Dom *dom, dom_node *node)
+{
+	uint32 i;
+
+	for (i = 0; dom && i < dom->nfields; i++)
+		if (dom->fields[i].node == node)
+			return dom->fields[i].fe;
+	return NULL;
+}
+
 
 /* The element an event on layout's ELEMENT goes to, or NULL. */
 static dom_node *
@@ -2501,7 +2542,10 @@ typedef struct {
 	char *buf;
 	size_t len, cap;
 	XP_Bool failed;
-	XP_Bool for_layout;		/* scripts left out (they have run) */
+	XP_Bool for_layout;		/* scripts left out (they have run), and */
+	qjs_Dom *dom;			/* form fields as they are now */
+	lo_FormElementOptionData *opts;	/* in a select: its options' state */
+	int32 nopts, opt_index;
 } qjs_Buf;
 
 static void
@@ -2604,6 +2648,41 @@ qjs_serialise(qjs_Buf *b, dom_node *n, XP_Bool raw_text)
 			name[i] = tolower((unsigned char) dom_string_data(s)[i]);
 		name[len] = '\0';
 		dom_string_unref(s);
+		LO_FormElementStruct *fe = NULL;
+		LO_FormElementData *fd = NULL;
+		const char *live = NULL;	/* the attribute the field's state replaces */
+		char *live_value = NULL;
+		int live_on = -1;			/* checked / selected: 1, 0; -1 none */
+
+		if (b->for_layout && b->dom &&
+			(!strcmp(name, "input") || !strcmp(name, "textarea") ||
+			 !strcmp(name, "select")) &&
+			(fe = qjs_field_of(b->dom, n)) != NULL && (fd = fe->element_data) &&
+			b->dom->context) {
+			FE_GetFormElementValue(b->dom->context, fe, FALSE);
+			switch (fd->type) {
+			case FORM_TYPE_TEXT:
+			case FORM_TYPE_PASSWORD:
+				live = "value";
+				if (fd->ele_text.current_text)
+					live_value = qjs_FromDocumentCharset(b->dom->context,
+						(char *) fd->ele_text.current_text,
+						XP_STRLEN((char *) fd->ele_text.current_text));
+				break;
+			case FORM_TYPE_RADIO:
+			case FORM_TYPE_CHECKBOX:
+				live = "checked";
+				live_on = fd->ele_toggle.toggled ? 1 : 0;
+				break;
+			default:
+				break;
+			}
+		}
+		if (b->for_layout && b->opts && !strcmp(name, "option")) {
+			live = "selected";
+			live_on = b->opt_index < b->nopts && b->opts[b->opt_index].selected;
+			b->opt_index++;
+		}
 		buf_str(b, "<");
 		buf_str(b, name);
 		if ((!b->for_layout || strcmp(name, "script")) &&
@@ -2616,6 +2695,10 @@ qjs_serialise(qjs_Buf *b, dom_node *n, XP_Bool raw_text)
 					continue;
 				dom_attr_get_name(at, &an);
 				dom_attr_get_value(at, &av);
+				if (an && live && !strcasecmp(dom_string_data(an), live)) {
+					dom_string_unref(an);
+					an = NULL;		/* written below, as it is now */
+				}
 				if (an) {
 					buf_str(b, " ");
 					buf_add(b, dom_string_data(an), dom_string_byte_length(an));
@@ -2632,11 +2715,48 @@ qjs_serialise(qjs_Buf *b, dom_node *n, XP_Bool raw_text)
 			}
 			dom_namednodemap_unref(map);
 		}
+		if (live && live_value) {
+			buf_str(b, " ");
+			buf_str(b, live);
+			buf_str(b, "=\"");
+			buf_escaped(b, live_value, strlen(live_value), TRUE);
+			buf_str(b, "\"");
+		} else if (live && live_on == 1) {
+			buf_str(b, " ");
+			buf_str(b, live);
+		}
+		XP_FREEIF(live_value);
 		buf_str(b, ">");
 		if (qjs_in_list(name, qjs_void_tags))
 			return;
 		if (b->for_layout && !strcmp(name, "script")) {
 			buf_str(b, "</script>");
+			return;
+		}
+		if (fd && fd->type == FORM_TYPE_TEXTAREA) {
+			char *t = fd->ele_textarea.current_text ?
+				qjs_FromDocumentCharset(b->dom->context,
+					(char *) fd->ele_textarea.current_text,
+					XP_STRLEN((char *) fd->ele_textarea.current_text)) : NULL;
+			if (t) {
+				buf_escaped(b, t, strlen(t), FALSE);
+				XP_FREE(t);
+			}
+			buf_str(b, "</textarea>");
+			return;
+		}
+		if (fd && (fd->type == FORM_TYPE_SELECT_ONE ||
+				   fd->type == FORM_TYPE_SELECT_MULT)) {
+			lo_FormElementOptionData *so = b->opts;
+			int32 sn = b->nopts, si = b->opt_index;
+			b->opts = (lo_FormElementOptionData *) fd->ele_select.options;
+			b->nopts = fd->ele_select.option_cnt;
+			b->opt_index = 0;
+			qjs_serialise_children(b, n, FALSE);
+			b->opts = so;
+			b->nopts = sn;
+			b->opt_index = si;
+			buf_str(b, "</select>");
 			return;
 		}
 		raw = !strcmp(name, "script") || !strcmp(name, "style") ||
@@ -2811,6 +2931,106 @@ dom_protos_fn(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv
 	return JS_UNDEFINED;
 }
 
+/* field(n): the live state of form field N -- {value, checked, selected:
+ * [booleans]} -- or null when layout has none for it */
+static JSValue
+dom_field_fn(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	qjs_Dom *dom = qjs_cx_dom(cx);
+	LO_FormElementStruct *fe;
+	LO_FormElementData *d;
+	JSValue o;
+	NODE_ARG(n, 0);
+
+	if (!(fe = qjs_field_of(dom, n)) || !(d = fe->element_data) || !dom->context)
+		return JS_NULL;
+	FE_GetFormElementValue(dom->context, fe, FALSE);
+	o = JS_NewObject(cx);
+	switch (d->type) {
+	case FORM_TYPE_TEXT:
+	case FORM_TYPE_PASSWORD:
+	case FORM_TYPE_FILE:
+	case FORM_TYPE_TEXTAREA: {
+		char *t = (char *) (d->type == FORM_TYPE_TEXTAREA ?
+							d->ele_textarea.current_text : d->ele_text.current_text);
+		char *u = t ? qjs_FromDocumentCharset(dom->context, t, XP_STRLEN(t)) : NULL;
+		JS_SetPropertyStr(cx, o, "value", JS_NewString(cx, u ? u : ""));
+		XP_FREEIF(u);
+		break;
+	}
+	case FORM_TYPE_RADIO:
+	case FORM_TYPE_CHECKBOX:
+		JS_SetPropertyStr(cx, o, "checked", JS_NewBool(cx, d->ele_toggle.toggled));
+		break;
+	case FORM_TYPE_SELECT_ONE:
+	case FORM_TYPE_SELECT_MULT: {
+		lo_FormElementOptionData *opt = (lo_FormElementOptionData *) d->ele_select.options;
+		JSValue a = JS_NewArray(cx);
+		int32 i;
+		for (i = 0; opt && i < d->ele_select.option_cnt; i++)
+			JS_SetPropertyUint32(cx, a, i, JS_NewBool(cx, opt[i].selected));
+		JS_SetPropertyStr(cx, o, "selected", a);
+		break;
+	}
+	default:
+		JS_FreeValue(cx, o);
+		return JS_NULL;
+	}
+	return o;
+}
+
+/* setField(n, what, v): set form field N's "value", "checked" or
+ * "selected" (an option index); FALSE when layout has no field for N */
+static JSValue
+dom_set_field_fn(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+	qjs_Dom *dom = qjs_cx_dom(cx);
+	LO_FormElementStruct *fe;
+	LO_FormElementData *d;
+	const char *what;
+	NODE_ARG(n, 0);
+
+	if (argc < 3 || !(fe = qjs_field_of(dom, n)) || !(d = fe->element_data) ||
+		!dom->context)
+		return JS_FALSE;
+	if (!(what = JS_ToCString(cx, argv[1])))
+		return JS_EXCEPTION;
+	if (!strcmp(what, "value") &&
+		(d->type == FORM_TYPE_TEXT || d->type == FORM_TYPE_PASSWORD ||
+		 d->type == FORM_TYPE_TEXTAREA)) {
+		size_t len;
+		const char *v = JS_ToCStringLen(cx, &len, argv[2]);
+		char *t = v ? qjs_ToDocumentCharset(dom->context, v, len, NULL) : NULL;
+		PA_Block *slot = d->type == FORM_TYPE_TEXTAREA ?
+			&d->ele_textarea.current_text : &d->ele_text.current_text;
+		if (v)
+			JS_FreeCString(cx, v);
+		if (t) {
+			XP_FREEIF(*slot);
+			*slot = (PA_Block) t;
+			FE_ChangeInputElement(dom->context, (LO_Element *) fe);
+		}
+	} else if (!strcmp(what, "checked") &&
+			   (d->type == FORM_TYPE_RADIO || d->type == FORM_TYPE_CHECKBOX)) {
+		d->ele_toggle.toggled = JS_ToBool(cx, argv[2]);
+		FE_SetFormElementToggle(dom->context, fe, d->ele_toggle.toggled);
+	} else if (!strcmp(what, "selected") &&
+			   (d->type == FORM_TYPE_SELECT_ONE || d->type == FORM_TYPE_SELECT_MULT)) {
+		lo_FormElementOptionData *opt = (lo_FormElementOptionData *) d->ele_select.options;
+		int32 k = -1, i;
+		JS_ToInt32(cx, &k, argv[2]);
+		for (i = 0; opt && i < d->ele_select.option_cnt; i++)
+			if (d->type == FORM_TYPE_SELECT_ONE || i == k)
+				opt[i].selected = i == k;
+		FE_ChangeInputElement(dom->context, (LO_Element *) fe);
+	} else {
+		JS_FreeCString(cx, what);
+		return JS_FALSE;
+	}
+	JS_FreeCString(cx, what);
+	return JS_TRUE;
+}
+
 static const JSCFunctionListEntry qjs_dom_functions[] = {
 	JS_CFUNC_DEF("document", 0, dom_document_fn),
 	JS_CFUNC_DEF("protos", 1, dom_protos_fn),
@@ -2850,6 +3070,8 @@ static const JSCFunctionListEntry qjs_dom_functions[] = {
 	JS_CFUNC_DEF("html", 2, dom_html_fn),
 	JS_CFUNC_DEF("parse", 1, dom_parse_fn),
 	JS_CFUNC_DEF("mutated", 0, dom_mutated_fn),
+	JS_CFUNC_DEF("field", 1, dom_field_fn),
+	JS_CFUNC_DEF("setField", 3, dom_set_field_fn),
 };
 
 /* ---- showing what scripts changed -----------------------------------------
@@ -2965,6 +3187,7 @@ qjs_dom_render(MochaDecoder *decoder, qjs_Dom *dom)
 	size_t len;
 
 	b.for_layout = TRUE;
+	b.dom = dom;
 	qjs_serialise(&b, (dom_node *) dom->doc, FALSE);
 	if (b.failed || !b.buf) {
 		XP_FREEIF(b.buf);
