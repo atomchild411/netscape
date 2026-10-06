@@ -15,6 +15,9 @@
 
 #include "mkutils.h"
 #include "mktls.h"
+#ifdef NS_HTTP2
+#include "mkh2.h"
+#endif
 
 #include "prerror.h"
 #include "prmem.h"
@@ -305,6 +308,12 @@ NET_TLS_Wrap(PRFileDesc *sock, const char *host, char **error_msg)
 	SSL_set_hostflags(tls->ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
 	net_tls_log("wrap fd %d for %s", osfd, tls->host);
 	SSL_set_connect_state(tls->ssl);
+#ifdef NS_HTTP2
+	/* offer HTTP/2: the server may pick it (NET_TLS_IsH2) */
+	if (NET_H2_Enabled())
+		SSL_set_alpn_protos(tls->ssl,
+							(const unsigned char *) "\002h2\010http/1.1", 12);
+#endif
 
 	layer = PR_CreateIOLayerStub(net_tls_identity, &net_tls_methods);
 	if (!layer) {
@@ -405,6 +414,20 @@ NET_TLS_Describe(PRFileDesc *sock)
 
 	if (!tls || !tls->handshake_done)
 		return NULL;
-	return PR_smprintf("%s, %s", SSL_get_version(tls->ssl),
-					   SSL_CIPHER_get_name(SSL_get_current_cipher(tls->ssl)));
+	return PR_smprintf("%s, %s%s", SSL_get_version(tls->ssl),
+					   SSL_CIPHER_get_name(SSL_get_current_cipher(tls->ssl)),
+					   NET_TLS_IsH2(sock) ? ", HTTP/2" : "");
+}
+
+MODULE_PRIVATE XP_Bool
+NET_TLS_IsH2(PRFileDesc *sock)
+{
+	NetTLS *tls = net_tls_of(sock);
+	const unsigned char *proto = NULL;
+	unsigned int len = 0;
+
+	if (!tls || !tls->handshake_done)
+		return FALSE;
+	SSL_get0_alpn_selected(tls->ssl, &proto, &len);
+	return len == 2 && proto[0] == 'h' && proto[1] == '2';
 }

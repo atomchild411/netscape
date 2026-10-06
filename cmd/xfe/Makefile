@@ -714,6 +714,9 @@ else
 OTHER_LIBS	= -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm -lpthread $(OS_LIBS)
 ifdef NS_OPENSSL
 OTHER_LIBS	:= -lssl -lcrypto $(OTHER_LIBS)
+ifdef NS_HTTP2
+OTHER_LIBS	:= -lnghttp2 $(OTHER_LIBS)
+endif
 endif
 ifdef NS_LIBCSS
 OTHER_LIBS	:= -lcss -lparserutils -lwapcaplet $(OTHER_LIBS)

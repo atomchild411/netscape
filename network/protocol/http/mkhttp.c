@@ -35,6 +35,9 @@
 #include "httpurl.h"
 #ifdef NS_OPENSSL
 #include "mktls.h"
+#ifdef NS_HTTP2
+#include "mkh2.h"
+#endif
 #endif
 #include "shist.h"
 #include "glhist.h"
@@ -231,6 +234,10 @@ typedef struct _HTTPConData {
 #ifdef NS_OPENSSL
     Bool         secure;            /* https: TLS on the connection */
     Bool         tls_wait_write;    /* handshake waits for writability */
+#endif
+#ifdef NS_HTTP2
+    Bool         h2_attached;       /* has had a stream on a session */
+    Bool         h2_connecting;     /* requests wait for this connection */
 #endif
     void        *write_post_data_data;   /* a data object 
                                           * for the WritePostData function */
@@ -494,6 +501,32 @@ net_start_http_connect(ActiveEntry * ce)
 
   HG22201
 
+#ifdef NS_HTTP2
+    /* An HTTP/2 connection to the host already: a stream on it, with no
+     * connect or handshake.  If it fails before the response starts (the
+     * server had closed the connection), the request is tried again on a
+     * new connection, as for a kept-alive one (but only once). */
+    if(cd->secure && !cd->proxy_server && !cd->use_proxy_tunnel)
+      {
+        PRFileDesc *stream = NET_H2_StreamFor(cd->connection->hostname);
+
+        if(stream)
+          {
+            cd->connection->sock = stream;
+            ce->socket = stream;
+            NET_TotalNumberOfOpenConnections++;
+            cd->connection->prev_cache = !cd->h2_attached;
+            cd->h2_attached = TRUE;
+            if(ce->URL_s->files_to_post)
+                cd->next_state = HTTP_BEGIN_UPLOAD_FILE;
+            else
+                cd->next_state = HTTP_SEND_REQUEST;
+            NET_SetReadSelect(ce->window_id, stream);
+            return 0;
+          }
+      }
+#endif
+
     /* if proxy_server is non NULL then use the string as a host:port
      * when a proxy server is used a connection is made to the proxy
      * host and port and the entire URL is sent instead of just
@@ -536,6 +569,14 @@ net_start_http_connect(ActiveEntry * ce)
 
   if(cd->connection->sock != NULL)
     NET_TotalNumberOfOpenConnections++;
+
+#ifdef NS_HTTP2
+  /* other requests to the host wait to see if it speaks HTTP/2 */
+  if(ce->status >= 0 && cd->connection->sock && cd->secure
+     && !cd->proxy_server && !cd->use_proxy_tunnel && !cd->h2_connecting)
+    cd->h2_connecting = NET_H2_Connecting(cd->connection->sock,
+                                          cd->connection->hostname);
+#endif
 
     if (ce->status < 0) 
       {
@@ -3581,6 +3622,31 @@ net_http_tls_handshake(ActiveEntry *ce)
             PR_Free(what);
           }
       }
+#ifdef NS_HTTP2
+    /* The server speaks HTTP/2: the connection becomes a session, this
+     * request its first stream, and later ones to the host share it. */
+    if(!NET_TLS_IsH2(sock) && cd->h2_connecting)
+        NET_H2_NotH2(sock, cd->connection->hostname);
+    cd->h2_connecting = FALSE;
+    if(NET_TLS_IsH2(sock) && !cd->use_proxy_tunnel)
+      {
+        PRFileDesc *stream;
+
+        NET_ClearReadSelect(ce->window_id, sock);
+        stream = NET_H2_Adopt(sock, cd->connection->hostname);
+        cd->connection->sock = stream;
+        ce->socket = stream;
+        if(!stream)
+          {
+            NET_TotalNumberOfOpenConnections--;
+            StrAllocCopy(ce->URL_s->error_msg, "Cannot start HTTP/2.");
+            cd->next_state = HTTP_ERROR_DONE;
+            return MK_UNABLE_TO_CONNECT;
+          }
+        cd->h2_attached = TRUE;
+        NET_SetReadSelect(ce->window_id, stream);
+      }
+#endif
     if(ce->URL_s->files_to_post)
         cd->next_state = HTTP_BEGIN_UPLOAD_FILE;
     else
@@ -3723,6 +3789,12 @@ HG51096
             break;
         
         case HTTP_ERROR_DONE:
+#ifdef NS_HTTP2
+            if(cd->h2_connecting) {
+                NET_H2_Abandon(cd->connection->sock);
+                cd->h2_connecting = FALSE;
+            }
+#endif
             if(cd->connection->sock != NULL) {
                 NET_ClearDNSSelect(ce->window_id, cd->connection->sock);
                 NET_ClearReadSelect(ce->window_id, cd->connection->sock);

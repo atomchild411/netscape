@@ -55,11 +55,14 @@ endif
 
 ifdef NS_OPENSSL
 CSRCS += mktls.c
+ifdef NS_HTTP2
+CSRCS += mkh2.c
+endif
 endif
 
 EXPORTS= mkstream.h mkparse.h mkfsort.h mksort.h mkgeturl.h \
 	netstream.h mkselect.h mktcp.h netutils.h mkpadpac.h mkautocf.h mkhelp.h \
-        mkutils.h mktrace.h mktls.h
+        mkutils.h mktrace.h mktls.h mkh2.h
 
 ifdef MOZ_MAIL_NEWS
 EXPORTS += mkldap.h

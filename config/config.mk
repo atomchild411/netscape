@@ -501,6 +501,13 @@ endif
 
 ifdef NS_OPENSSL
 DEFINES		+= -DNS_OPENSSL
+# HTTP/2 by nghttp2 (network/main/mkh2.c), over TLS only
+ifndef NS_IRIX_MOTIF
+NS_HTTP2	= 1
+endif
+ifdef NS_HTTP2
+DEFINES		+= -DNS_HTTP2
+endif
 ifdef NS_CA_FILE
 DEFINES		+= -DNS_CA_FILE=\"$(NS_CA_FILE)\"
 endif

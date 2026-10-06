@@ -39,6 +39,9 @@ extern XP_Bool NET_TLS_IsTLS(PRFileDesc *sock);
  * come back for them by itself. */
 extern PRInt32 NET_TLS_Pending(PRFileDesc *sock);
 
+/* Did the server pick HTTP/2 ("h2", by ALPN) in the handshake? */
+extern XP_Bool NET_TLS_IsH2(PRFileDesc *sock);
+
 /* "TLSv1.3, TLS_AES_256_GCM_SHA384" for the connection on SOCK, or NULL.
  * The string is the caller's (PR_Free). */
 extern char *NET_TLS_Describe(PRFileDesc *sock);
