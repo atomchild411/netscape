@@ -8311,9 +8311,37 @@ flex_widths_done:
 			if (state->x + w > state->right_margin &&
 				state->line_list != NULL)
 				lo_SetSoftLineBreakState(context, state, FALSE, 1);
-			lo_fillin_text_info(context, state);
-			lo_CalcAlignOffsets(state, &state->text_info, LO_ALIGN_BASELINE,
-				w, h, &x_off, &y_off, &line_inc, &baseline_inc);
+			/* its baseline: its last line's (CSS 2.1 10.8.1), else its
+			 * bottom; the part below the baseline deepens the line */
+			{
+				int32 asc = h, below;
+				LO_Element *e, *lf = NULL;
+
+				for (e = first; e != NULL; e = e->lo_any.next)
+					if (e->type == LO_CELL)
+					{
+						LO_Element *c;
+
+						for (c = ((LO_CellStruct *)e)->cell_list; c != NULL;
+							 c = c->lo_any.next)
+							if (c->type == LO_LINEFEED)
+								lf = c;
+					}
+				if (lf != NULL)
+				{
+					int32 a = lf->lo_any.y + lf->lo_linefeed.baseline -
+						table->table_ele->y;
+
+					if (a > 0 && a <= h)
+						asc = a;
+				}
+				lo_fillin_text_info(context, state);
+				lo_CalcAlignOffsets(state, &state->text_info, LO_ALIGN_BASELINE,
+					w, asc, &x_off, &y_off, &line_inc, &baseline_inc);
+				below = h - asc - (state->line_height - state->baseline);
+				if (below > line_inc)
+					line_inc = below;
+			}
 			dx = state->x - table->table_ele->x;
 			dy = state->y + y_off - table->table_ele->y;
 			if (lo_TableTrace())
