@@ -926,6 +926,18 @@ lo_SetLineBreakState(MWContext *context,
 		if(style)
 		{
 			char * property = STYLESTRUCT_GetString(style, DISPLAY_STYLE);
+#ifdef NS_LIBCSS
+			/* (not inside an inline-block's own box: it is a table
+			 * cell, whose lines end as any block's) */
+			char *ib = STYLESTRUCT_GetString(style, INLINEBLOCK_STYLE);
+
+			if(ib && state->is_a_subdoc == SUBDOC_CELL)
+			{
+				XP_FREEIF(property);
+				property = NULL;
+			}
+			XP_FREEIF(ib);
+#endif
 			if(property && !strcasecomp(property, INLINE_STYLE))
 			{
 				XP_FREE(property);

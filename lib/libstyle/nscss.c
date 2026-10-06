@@ -125,10 +125,9 @@
 #define TEXTSHADOW_PROP			"nsTextShadow"	/* "dx dy #rrggbb" */
 #define BGPOS_PROP				"nsBgPos"		/* "X Y": px or N% */
 #define INLINEBLOCK_PROP		"nsInlineBlock"	/* display: inline-block */
-/* inline-block as boxes in the line (laytable.c css_inline): not yet by
- * default (a one-line box measures no height); NSCSS_INLINE_BLOCK in the
- * environment turns them on */
-#define NSCSS_INLINE_BLOCK_BOXES (getenv("NSCSS_INLINE_BLOCK") != NULL)
+/* inline-block as boxes in the line (laytable.c css_inline);
+ * NSCSS_NO_INLINE_BLOCK in the environment makes them inline again */
+#define NSCSS_INLINE_BLOCK_BOXES (getenv("NSCSS_NO_INLINE_BLOCK") == NULL)
 #define MARGINAUTO_PROP			"nsMarginAuto"	/* "both", "left", "right" */
 #define GRIDJUSTIFYSELF_PROP	"nsGridJustifySelf"
 #define BORDERTOPWIDTH_PROP		"borderTopWidth"
