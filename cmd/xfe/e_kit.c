@@ -27,6 +27,7 @@
 #include "xfe.h"
 #include "xpgetstr.h"
 #include "e_kit.h"
+#include <unistd.h>
 #include "e_kit_patch.h"
 #include "prefapi.h"
 #include "AnimationType.h"
@@ -272,7 +273,7 @@ ekit_LoadCustomUrl(char* prefix, MWContext* context)
  */
 static int
 read_frames(FILE* file, int num_frames, int width, int height,
-                        struct fe_icon_data* anim)
+                        int num_colors, struct fe_icon_data* anim)
 {
     int i;
     int j;
@@ -307,6 +308,10 @@ read_frames(FILE* file, int num_frames, int width, int height,
         }
  
         for ( j = 0; j < width*height; j++ ) {
+            /* (masked-out pixels may hold anything) */
+            if ( anim[i].color_bits[j] >= num_colors ) {
+                anim[i].color_bits[j] = 0;
+            }
             anim[i].color_bits[j]+= fe_n_icon_colors;
         }
     }
@@ -386,7 +391,20 @@ load_animation(char* filename)
     fe_anim_frames[XFE_ANIMATION_CUSTOM*2] = num_frames_large;
     fe_anim_frames[XFE_ANIMATION_CUSTOM*2+1] = num_frames_small;
  
-    if ( fscanf(file, " %d ", &num_colors) != 1 ) {
+    /* sane sizes: frames are allocated from these */
+    if ( num_frames_large < 0 || num_frames_large > 256 ||
+         width_large <= 0 || width_large > 256 ||
+         height_large <= 0 || height_large > 256 ||
+         width_small <= 0 || width_small > 256 ||
+         height_small <= 0 || height_small > 256 ) {
+        ekit_errno = XFE_ANIM_READING_SIZES;
+        return False;
+    }
+
+    /* the colours go after the icons' own in the 256-entry table, and
+     * frame pixels index them in 8 bits */
+    if ( fscanf(file, " %d ", &num_colors) != 1 ||
+         num_colors < 0 || fe_n_icon_colors + num_colors > 256 ) {
         ekit_errno = XFE_ANIM_READING_NUM_COLORS;
         return False;
     }
@@ -409,9 +427,9 @@ load_animation(char* filename)
     }
  
     if ( read_frames(file, num_frames_large, width_large, height_large,
-                     anim_custom_large) == -1 ||
+                     num_colors, anim_custom_large) == -1 ||
          read_frames(file, num_frames_small, width_small, height_small,
-                     anim_custom_small) == -1 ) {
+                     num_colors, anim_custom_small) == -1 ) {
         ekit_errno = XFE_ANIM_READING_FRAMES;
         return False;
     }
@@ -441,6 +459,22 @@ ekit_LoadCustomAnimation(void)
     char* anim_file = NULL;
 
     PREF_CopyConfigString("x_animation_file", &anim_file);
+
+    /*
+     * Else the animation SGI's Netscape for IRIX shows, from that
+     * Netscape's own files where it is installed (they are SGI's, and
+     * not ours to ship): $SGI_ANIM as its netscape script sets it, or
+     * the cube.  Not there: the built-in animation.
+     */
+    if ( anim_file == NULL || *anim_file == '\0' ) {
+        static const char sgi_cube[] = "/var/netscape/communicator/anim_cube.dat";
+        char *e = getenv("SGI_ANIM");
+
+        if ( e && *e && access(e, R_OK) == 0 )
+            anim_file = XP_STRDUP(e);
+        else if ( access(sgi_cube, R_OK) == 0 )
+            anim_file = XP_STRDUP(sgi_cube);
+    }
 
     if ( anim_file == NULL || *anim_file == '\0' ) return;
 
