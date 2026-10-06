@@ -813,6 +813,152 @@ static void lo_edt_AvoidImageBlock(LO_ImageStruct *image)
 extern Bool
 lo_FindMochaExpr(char *str, char **expr_start, char **expr_end);
 
+/*
+ * An image's size from the style sheet (libcss: CSS width, height,
+ * max-width), over its WIDTH and HEIGHT attributes.  With only one of
+ * width and height set, the other follows the image's proportions (from
+ * the attributes if they give both; else the image library scales it).
+ * A percentage width is of the column the image is in.
+ */
+/*
+ * An image with no size from the page is drawn at its own; an SVG with only a
+ * viewBox has none and takes the width of the column it is in.  Set just
+ * before lo_GetImage, which hands it to the image library.
+ */
+static int32 lo_image_fit;
+
+static void
+lo_image_fit_width(MWContext *context, lo_DocState *state,
+				   LO_ImageStruct *image)
+{
+	int32 avail = state->right_margin - state->left_margin;
+
+	lo_image_fit = 0;
+	if (image->width == 0 && image->height == 0 && avail > 0)
+		lo_image_fit = avail / context->convertPixX;
+}
+
+/*
+ * Could this <img> take the width of its column: no size given in the tag,
+ * and a source that looks like an SVG?  Those are not fetched ahead of
+ * layout (lo_BlockedImageLayout), which does not know the column yet.
+ */
+static Bool
+lo_image_may_fit(MWContext *context, PA_Tag *tag)
+{
+	PA_Block buff;
+	char *str, *end;
+	Bool fit = FALSE;
+
+	if ((buff = lo_FetchParamValue(context, tag, PARAM_WIDTH)) != NULL) {
+		PA_FREE(buff);
+		return FALSE;
+	}
+	if ((buff = lo_FetchParamValue(context, tag, PARAM_HEIGHT)) != NULL) {
+		PA_FREE(buff);
+		return FALSE;
+	}
+	if ((buff = lo_FetchParamValue(context, tag, PARAM_SRC)) == NULL)
+		return FALSE;
+	PA_LOCK(str, char *, buff);
+	if (str != NULL) {
+		end = str + strcspn(str, "?#");
+		while (end > str && XP_IS_SPACE(end[-1]))
+			end--;
+		fit = !XP_STRNCASECMP(str, "data:image/svg", 14) ||
+			(end - str >= 4 && !XP_STRNCASECMP(end - 4, ".svg", 4));
+	}
+	PA_UNLOCK(buff);
+	PA_FREE(buff);
+	return fit;
+}
+
+static void
+lo_image_style_size(MWContext *context, lo_DocState *state,
+					LO_ImageStruct *image)
+{
+	StyleStruct *style;
+	SS_Number *w, *h, *mw;
+	int32 aw = image->width, ah = image->height;
+	Bool apct = image->percent_width != 0 || image->percent_height != 0;
+
+	if (!state->top_state || !state->top_state->style_stack)
+		return;
+	style = STYLESTACK_GetStyleByIndex(state->top_state->style_stack, 0);
+	if (!style)
+		return;
+	/* (nscss.c exports an image's CSS size under names of its own) */
+	w = STYLESTRUCT_GetNumber(style, "nsImageWidth");
+	h = STYLESTRUCT_GetNumber(style, "nsImageHeight");
+	mw = STYLESTRUCT_GetNumber(style, "nsImageMaxWidth");
+
+	if (w && w->value > 0) {
+		if (w->units && !strcmp(w->units, "%")) {
+			/* of the column the image is in, in pixels now: the image
+			 * library then scales the picture to it (the percent_width
+			 * of the WIDTH attribute sized the box, not the picture) */
+			image->percent_width = 0;
+			image->width = (state->right_margin - state->left_margin) *
+				(int32) w->value / 100;
+			if (image->width < 1)
+				image->width = 1;
+		} else {
+			LO_AdjustSSUnits(w, WIDTH_STYLE, context, state);
+			image->percent_width = 0;
+			image->width = FEUNITS_X((int32) (w->value + 0.5), context);
+		}
+	}
+	if (h && h->value > 0) {
+		if (h->units && !strcmp(h->units, "%")) {
+			image->percent_height = (int32) h->value;
+			image->height = (int32) h->value;
+		} else {
+			LO_AdjustSSUnits(h, HEIGHT_STYLE, context, state);
+			image->percent_height = 0;
+			image->height = FEUNITS_Y((int32) (h->value + 0.5), context);
+		}
+	}
+	/* one of them set: the other in proportion */
+	if (w && w->value > 0 && !(h && h->value > 0)) {
+		if (!apct && aw > 0 && ah > 0 && !image->percent_width)
+			image->height = ah * image->width / aw;
+		else {
+			image->height = 0;
+			image->percent_height = 0;
+		}
+	} else if (h && h->value > 0 && !(w && w->value > 0)) {
+		if (!apct && aw > 0 && ah > 0 && !image->percent_height)
+			image->width = aw * image->height / ah;
+		else {
+			image->width = 0;
+			image->percent_width = 0;
+		}
+	}
+	/* max-width (100%: pictures that shrink to fit their column) */
+	if (mw && mw->value > 0 && image->width > 0 && !image->percent_width) {
+		int32 limit;
+
+		if (mw->units && !strcmp(mw->units, "%"))
+			limit = (state->right_margin - state->left_margin) *
+				(int32) mw->value / 100;
+		else {
+			LO_AdjustSSUnits(mw, WIDTH_STYLE, context, state);
+			limit = FEUNITS_X((int32) (mw->value + 0.5), context);
+		}
+		if (limit > 0 && image->width > limit) {
+			if (image->height > 0 && !image->percent_height)
+				image->height = image->height * limit / image->width;
+			image->width = limit;
+		}
+	}
+	if (w)
+		STYLESTRUCT_FreeSSNumber(style, w);
+	if (h)
+		STYLESTRUCT_FreeSSNumber(style, h);
+	if (mw)
+		STYLESTRUCT_FreeSSNumber(style, mw);
+}
+
 void
 lo_BlockedImageLayout(MWContext *context, lo_DocState *state, PA_Tag *tag,
                       char *base_url)
@@ -832,6 +978,9 @@ lo_BlockedImageLayout(MWContext *context, lo_DocState *state, PA_Tag *tag,
 	 * style stack in here as well as in normal layout
 	 * mode so that we can set image widths
 	 */
+	if (lo_image_may_fit(context, tag))
+		return;
+
 	push_status = LO_PushTagOnStyleStack(context, state, tag);
 
 	/* 
@@ -1214,12 +1363,8 @@ lo_BlockedImageLayout(MWContext *context, lo_DocState *state, PA_Tag *tag,
 		PA_FREE(buff);
 	}
 
-	/* disabled because it is broken by JS threading 
-	 *
-	 * val = LO_GetHeightFromStyleSheet(context, state);
-	 * if(val)
-	 *	image->height = val;
-	 */
+	/* the style sheet's width and height (CSS) */
+	lo_image_style_size(context, state, image);
 
 	/*
 	 * Get the border parameter.
@@ -1330,6 +1475,7 @@ lo_BlockedImageLayout(MWContext *context, lo_DocState *state, PA_Tag *tag,
     image_obs_list = lo_NewImageObserverList(context, image);
     if (!image_obs_list)
         return;
+	lo_image_fit_width(context, state, image);
 	lo_GetImage(context, context->img_cx, image, image_obs_list,
                 state->top_state->force_reload);
 
@@ -1954,12 +2100,8 @@ lo_FormatImage(MWContext *context, lo_DocState *state, PA_Tag *tag)
 		PA_FREE(buff);
 	}
 
-	/* disabled because it is broken by JS threading 
-	 *
-	 * val = LO_GetHeightFromStyleSheet(context, state);
-	 * if(val)
-	 *	image->height = val;
-	 */
+	/* the style sheet's width and height (CSS) */
+	lo_image_style_size(context, state, image);
 
 	/*
 	 * Get the border parameter.
@@ -2081,6 +2223,7 @@ lo_FormatImage(MWContext *context, lo_DocState *state, PA_Tag *tag)
     image_obs_list = lo_NewImageObserverList(context, image);
     if (!image_obs_list)
         return;
+	lo_image_fit_width(context, state, image);
 	lo_GetImage(context, context->img_cx, image, image_obs_list,
                     state->top_state->force_reload);
 
@@ -3085,6 +3228,9 @@ void lo_GetImage(MWContext *context, IL_GroupContext *img_cx,
     IL_IRGB *trans_pixel;
     char *image_url, *lowres_image_url, *url_to_fetch;
 	IL_ImageReq *dummy_ireq;
+	int32 fit_width = lo_image_fit;
+
+	lo_image_fit = 0;
 
     /* Safety checks. */
     if (!context || !lo_image)
@@ -3202,7 +3348,8 @@ void lo_GetImage(MWContext *context, IL_GroupContext *img_cx,
                                       lo_image->height / context->convertPixY,
                                       /* Special flag for Editor so the correct stream
                                          converter is used (see IL_ViewStream in libimg/src/external.c */
-                                      context->is_editor ? 0x000000ED : 0, 
+                                      (context->is_editor ? 0x000000ED : 0) |
+                                      IL_FIT_WIDTH(fit_width),
                                       net_cx);
 
 		if(( dummy_ireq != lo_image->lowres_image_req ) && url_to_fetch )

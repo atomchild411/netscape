@@ -254,6 +254,18 @@ il_remove_client_context(IL_GroupContext *img_cx, il_container *ic)
     }
 }
 
+/* Could URL be an SVG, which may take the width of its box? */
+static PRBool
+il_may_fit(const char *url)
+{
+    const char *end;
+
+    if (!PL_strncasecmp(url, "data:image/svg", 14))
+        return PR_TRUE;
+    end = url + strcspn(url, "?#");
+    return (PRBool) (end - url >= 4 && !PL_strncasecmp(end - 4, ".svg", 4));
+}
+
 /* Returns TRUE if image container appears to match search parameters */
 static int
 il_image_match(il_container *ic,          /* Candidate for match. */
@@ -262,7 +274,8 @@ il_image_match(il_container *ic,          /* Candidate for match. */
                IL_IRGB *background_color,
                int req_depth,             /* Colorspace depth. */
                int req_width,             /* Target image width. */
-               int req_height)            /* Target image height. */
+               int req_height,            /* Target image height. */
+               int fit_width)             /* Width of the image's box. */
 {
     PRBool ic_sized = (PRBool)(ic->state >= IC_SIZED);
     NI_PixmapHeader *img_header = &ic->image->header;
@@ -288,6 +301,12 @@ il_image_match(il_container *ic,          /* Candidate for match. */
         /* Request dimensions zero, cache entry has natural dimensions. */
         (!req_width && !req_height && ic->natural_size)
         ))
+        return FALSE;
+
+    /* An image drawn at the width of its box matches only that width.
+       Before it is decoded, guess from the URL whether it may be one. */
+    if (!req_width && !req_height && ic->fit_width != fit_width &&
+        (ic->fit_used || (!ic_sized && il_may_fit(image_url))))
         return FALSE;
 
 	/* We allow any depth image through as the FE may have asked us to
@@ -367,7 +386,8 @@ il_images_match(il_container *ic1, il_container *ic2)
                           ic2->url_address,
                           ic2->background_color,
                           ic2->image->header.color_space->pixmap_depth,
-                          ic2->dest_width, ic2->dest_height);
+                          ic2->dest_width, ic2->dest_height,
+                          ic2->fit_width);
 }
 
 static il_container *
@@ -377,7 +397,8 @@ il_find_in_cache(IL_DisplayType display_type,
                  IL_IRGB* background_color,
                  int req_depth,
                  int req_width,
-                 int req_height)
+                 int req_height,
+                 int fit_width)
 {
 	il_container *ic=0;
 	PR_ASSERT(hash);
@@ -386,7 +407,7 @@ il_find_in_cache(IL_DisplayType display_type,
 		if (ic->hash != hash)
             continue;
         if (il_image_match(ic, display_type, image_url, background_color, req_depth,
-                           req_width, req_height))
+                           req_width, req_height, fit_width))
 			break;
 	}
 	if (ic)
@@ -429,7 +450,8 @@ il_get_container(IL_GroupContext *img_cx,
                  IL_DitherMode dither_mode,
                  int req_depth,
                  int req_width,  /* Target width requested by client. */
-                 int req_height) /* Target height requested by client. */
+                 int req_height, /* Target height requested by client. */
+                 int fit_width)  /* Width of the image's box (IL_FIT_WIDTH). */
 {
     uint32 urlhash, hash;
     il_container *ic;
@@ -449,7 +471,8 @@ il_get_container(IL_GroupContext *img_cx,
            
     /* Check the cache */
     ic = il_find_in_cache(img_cx->display_type, hash, image_url,
-                          background_color, req_depth, req_width, req_height);
+                          background_color, req_depth, req_width, req_height,
+                          fit_width);
     
     if (ic) {
        
@@ -549,6 +572,8 @@ il_get_container(IL_GroupContext *img_cx,
 		ic->is_url_loading = PR_FALSE;
         ic->dest_width  = req_width;
         ic->dest_height = req_height;
+        if (!req_width && !req_height)
+            ic->fit_width = fit_width;
 
         /* The image context is saved for use during decoding only. */
         ic->img_cx = img_cx;

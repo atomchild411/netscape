@@ -250,6 +250,9 @@ struct il_container_struct {
     uint32 content_length;
 
     int dest_width, dest_height; /* Target dimensions of the image */
+    int fit_width;              /* for an image with no size of its own:
+                                   the width of its box (IL_FIT_WIDTH) */
+    PRPackedBool fit_used;      /* and it was drawn at that width */
     PRPackedBool natural_size;  /* True if the image is decoded to its natural
                                    size. */
     PRPackedBool aspect_distorted; /* True if the image undergoes aspect ratio
@@ -506,7 +509,8 @@ extern il_container
                   IL_DitherMode dither_mode,
                   int req_depth,
                   int req_width,
-                  int req_height);
+                  int req_height,
+                  int fit_width);
 
 /* Destroy an IL_Pixmap. */
 extern void

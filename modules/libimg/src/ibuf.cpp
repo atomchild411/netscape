@@ -9,6 +9,7 @@
 
 #include "if.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -112,9 +113,44 @@ il_buf_emit(il_container *ic, unsigned char *rgba, int w, int h)
 		il_emit_row(ic, NULL, rgba + (size_t) y * w * 4, 0, w, y, 1, ilErase, 0);
 }
 
+/* Does the root <svg> tag give a size (width or height, not a percentage)?
+   Without one the image has only a shape, its viewBox, and takes the width
+   of its box; nanosvg reports the viewBox's size in that case. */
+static XP_Bool
+il_svg_has_size(const char *buf)
+{
+	const char *p = strstr(buf, "<svg"), *end, *a;
+	const char *names[2] = { "width", "height" };
+	int i;
+
+	if (!p || !(end = strchr(p, '>')))
+		return TRUE;
+	for (i = 0; i < 2; i++) {
+		size_t n = strlen(names[i]);
+		for (a = p + 4; a < end && (a = strstr(a, names[i])) && a < end;
+			 a += n) {
+			const char *v = a + n;
+			if (!isspace((unsigned char) a[-1]))
+				continue;
+			while (isspace((unsigned char) *v))
+				v++;
+			if (*v++ != '=')
+				continue;
+			while (isspace((unsigned char) *v) || *v == '"' || *v == '\'')
+				v++;
+			while (isdigit((unsigned char) *v) || *v == '.')
+				v++;
+			if (*v != '%')
+				return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 static void
 il_buf_svg(il_container *ic, il_buf_struct *b)
 {
+	XP_Bool sized = il_svg_has_size((char *) b->buf);
 	NSVGimage *img = nsvgParse((char *) b->buf, "px", 96.0f);
 	NSVGrasterizer *r;
 	float w, h, scale = 1.0f;
@@ -125,10 +161,20 @@ il_buf_svg(il_container *ic, il_buf_struct *b)
 		return;
 	w = img->width > 0 ? img->width : IL_SVG_DEFAULT_W;
 	h = img->height > 0 ? img->height : IL_SVG_DEFAULT_H;
-	if (w > IL_BUF_MAX_SIDE || h > IL_BUF_MAX_SIDE)
-		scale = (float) IL_BUF_MAX_SIDE / (w > h ? w : h);
-	iw = (int) (w * scale + 0.5f);
-	ih = (int) (h * scale + 0.5f);
+	if (!sized && ic->fit_width > 0 && img->width > 0) {
+		scale = (float) ic->fit_width / w;
+		ic->fit_used = TRUE;
+		w *= scale;
+		h *= scale;
+	}
+	if (w > IL_BUF_MAX_SIDE || h > IL_BUF_MAX_SIDE) {
+		float s = (float) IL_BUF_MAX_SIDE / (w > h ? w : h);
+		scale *= s;
+		w *= s;
+		h *= s;
+	}
+	iw = (int) (w + 0.5f);
+	ih = (int) (h + 0.5f);
 	if (iw < 1)
 		iw = 1;
 	if (ih < 1)

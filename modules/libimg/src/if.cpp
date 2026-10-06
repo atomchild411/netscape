@@ -1701,6 +1701,9 @@ IL_GetImage(const char* image_url,
     int is_internal_external_reconnect = FALSE;
 #endif /* STANDALONE_IMAGE_LIB */
     int is_view_image;
+    int fit_width = (int) (flags >> 16);
+
+    flags &= 0xffff;
 
     /* Create a new instance for this image request. */
     image_req = PR_NEWZAP(IL_ImageReq);
@@ -1765,7 +1768,7 @@ IL_GetImage(const char* image_url,
 
     ic = il_get_container(img_cx, cache_reload_policy, image_url,
                           background_color, img_cx->dither_mode, req_depth,
-                          req_width, req_height);
+                          req_width, req_height, fit_width);
     if (!ic)
     {
         ILTRACE(0,("il: MEM il_container"));

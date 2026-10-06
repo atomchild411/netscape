@@ -64,6 +64,9 @@
 #define BOTTOMPADDING_PROP		"paddingBottom"
 #define LEFTPADDING_PROP		"paddingLeft"
 #define WIDTH_PROP				"width"
+#define MAXWIDTH_PROP			"nsImageMaxWidth"
+#define IMGWIDTH_PROP			"nsImageWidth"
+#define IMGHEIGHT_PROP			"nsImageHeight"
 #define HEIGHT_PROP				"height"
 #define BORDERTOPWIDTH_PROP		"borderTopWidth"
 #define BORDERRIGHTWIDTH_PROP	"borderRightWidth"
@@ -1400,6 +1403,26 @@ nscss_media_list(const char *media)
 	return out;
 }
 
+/* NSCSS_DEBUG=/file (or any other value, for stderr): log each sheet, each
+ * tag and what it is given. */
+static FILE *nscss_log;
+
+static FILE *
+nscss_log_open(void)
+{
+	static int checked;
+
+	if (!checked) {
+		const char *e = getenv("NSCSS_DEBUG");
+		checked = 1;
+		if (e && *e == '/')
+			nscss_log = fopen(e, "a");
+		else if (e)
+			nscss_log = stderr;
+	}
+	return nscss_log;
+}
+
 void
 NSCSS_AddSheet(NSCSS_Doc *doc, const char *url, const char *charset,
 			   const char *media, const char *data, int32 len)
@@ -1411,6 +1434,11 @@ NSCSS_AddSheet(NSCSS_Doc *doc, const char *url, const char *charset,
 
 	if (!doc || !data)
 		return;
+	if (nscss_log_open()) {
+		fprintf(nscss_log, "sheet %s media \"%s\" %ld bytes\n",
+				url ? url : "(inline)", media ? media : "", (long) len);
+		fflush(nscss_log);
+	}
 	/* FNV-1a over URL, media and text: the same sheet once */
 	for (p = url ? url : ""; *p; p++)
 		h = (h ^ (unsigned char) *p) * 16777619u;
@@ -1516,9 +1544,6 @@ NSCSS_CloseNode(NSCSS_Doc *doc, NSCSS_Node *node)
 
 #define NSCSS_PRIORITY	MAX_STYLESTRUCT_PRIORITY
 
-/* NSCSS_DEBUG=/file (or any other value, for stderr): log each tag and
- * what it is given. */
-static FILE *nscss_log;
 
 static void
 nscss_set(StyleStruct *style, char *name, const char *value)
@@ -1533,19 +1558,10 @@ nscss_set(StyleStruct *style, char *name, const char *value)
 static void
 nscss_log_node(NSCSS_Node *node)
 {
-	static int checked;
 	NSCSS_Node *n;
 	int32 depth = 0;
 
-	if (!checked) {
-		const char *e = getenv("NSCSS_DEBUG");
-		checked = 1;
-		if (e && *e == '/')
-			nscss_log = fopen(e, "a");
-		else if (e)
-			nscss_log = stderr;
-	}
-	if (!nscss_log)
+	if (!nscss_log_open())
 		return;
 	for (n = node->parent; n; n = n->parent)
 		depth++;
@@ -1935,6 +1951,11 @@ nscss_layout_block(const char *n)
 	return FALSE;
 }
 
+/* replaced elements: sized by the style sheet even inline */
+static const char *const nscss_replaced_tags[] = {
+	"img", "object", "embed", "video", "canvas", "iframe", NULL
+};
+
 static void
 nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 			 const css_computed_style *ua_root, StyleStruct *style)
@@ -2062,6 +2083,26 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	if (block && css_computed_position(st) != CSS_POSITION_ABSOLUTE &&
 		css_computed_position(st) != CSS_POSITION_FIXED)
 		nscss_export_box(doc, node, st, style);
+
+	/* Images and the like are sized by the style sheet as they are,
+	 * inline: width, height, max-width (layimage.c). */
+	if (nscss_name_in(node, nscss_replaced_tags)) {
+		css_fixed rlen;
+		css_unit runit;
+		uint8_t rt;
+
+		/* (names of their own: layout's box code would take width as a
+		 * block's, set margins for it and start the line over) */
+		rt = css_computed_width(st, &rlen, &runit);
+		nscss_box_len(doc, style, IMGWIDTH_PROP, rt, CSS_WIDTH_SET, rlen, runit,
+					  NSCSS_FIX_MARK_POS);
+		rt = css_computed_height(st, &rlen, &runit);
+		nscss_box_len(doc, style, IMGHEIGHT_PROP, rt, CSS_HEIGHT_SET, rlen, runit,
+					  NSCSS_FIX_MARK_POS);
+		rt = css_computed_max_width(st, &rlen, &runit);
+		nscss_box_len(doc, style, MAXWIDTH_PROP, rt, CSS_MAX_WIDTH_SET, rlen,
+					  runit, NSCSS_FIX_MARK_POS);
+	}
 
 	switch (css_computed_vertical_align(st, &len, &unit)) {
 	case CSS_VERTICAL_ALIGN_BASELINE: nscss_set(style, VALIGN_PROP, "baseline"); break;

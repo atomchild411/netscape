@@ -52,6 +52,10 @@
 #define IL_STICKY           0x02   /* Don't throw this image out of cache.  */
 #define IL_BYPASS_CACHE     0x04   /* Don't get image out of image cache.   */
 #define IL_ONLY_FROM_CACHE  0x08   /* Don't load if image cache misses.     */
+/* With no requested size: the width of the box the image sits in, for an
+   image with a shape but no size of its own (an SVG with only a viewBox),
+   which takes that width.  In the flags' top half. */
+#define IL_FIT_WIDTH(w)     (((uint32)(w) & 0xffff) << 16)
 
 /* A rectangle structure. */
 typedef struct _IL_Rect {
