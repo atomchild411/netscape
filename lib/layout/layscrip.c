@@ -32,6 +32,8 @@
 #include "libevent.h"
 #include "css.h"
 #include "laystyle.h"
+
+extern void qjs_Log(const char *fmt, ...);
 #include "mcom_db.h"
 #include "laylayer.h"
 #include "prefapi.h"
@@ -1040,8 +1042,9 @@ lo_ProcessScriptTag(MWContext *context, lo_DocState *state, PA_Tag *tag, JSObjec
                 (!XP_STRCASECMP(str, "text/javascript"))) {
 		if(tag->type == P_STYLE || tag->type == P_LINK)
 		{
+		    /* the type is this element's: one sheet with another
+		     * type must not change what later ones are */
 		    top_state->in_script = SCRIPT_TYPE_JSSS;
-		    top_state->default_style_script_type = SCRIPT_TYPE_JSSS;
 		}
 		else
 		{
@@ -1051,12 +1054,10 @@ lo_ProcessScriptTag(MWContext *context, lo_DocState *state, PA_Tag *tag, JSObjec
             } 
             else if ((XP_STRCASECMP(str, TEXT_CSS) == 0)) {
                 top_state->in_script = SCRIPT_TYPE_CSS;
-                top_state->default_style_script_type = SCRIPT_TYPE_CSS;
                 type_explicitly_set = TRUE;
             } 
             else {
                 top_state->in_script = SCRIPT_TYPE_UNKNOWN;
-                top_state->default_style_script_type = SCRIPT_TYPE_UNKNOWN;
             }
             PA_UNLOCK(buff);
             PA_FREE(buff);
@@ -1571,6 +1572,10 @@ lo_css_complete(NET_StreamClass *stream)
     lo_CSSStream *s = (lo_CSSStream *) stream->data_object;
     lo_TopState *top_state = lo_FetchTopState(XP_DOCID(s->context));
 
+    if (getenv("NS_LINK_TRACE"))
+        qjs_Log("css: complete %s top %p stack %p len %ld failed %d",
+                s->data->url, top_state, top_state ? top_state->style_stack : 0,
+                (long) s->len, (int) s->failed);
     if (top_state && top_state->style_stack && s->buf && !s->failed)
         SML_AddStyleSheet(top_state->style_stack, s->data->url, NULL,
                           s->data->buffer, s->buf, s->len);
@@ -1583,6 +1588,8 @@ lo_css_abort(NET_StreamClass *stream, int status)
 {
     lo_CSSStream *s = (lo_CSSStream *) stream->data_object;
 
+    if (getenv("NS_LINK_TRACE"))
+        qjs_Log("css: abort %s status %d", s->data->url, status);
     XP_FREEIF(s->buf);
     XP_FREE(s);
 }
@@ -1608,6 +1615,8 @@ LO_CSSConverter(FO_Present_Types format_out, void *data_object,
 static void
 lo_css_link_exit_fn(URL_Struct *url_struct, int status, MWContext *context)
 {
+    if (getenv("NS_LINK_TRACE"))
+        qjs_Log("css: exit %s status %d", url_struct->address, status);
     lo_DestroyScriptData(url_struct->fe_data);
     NET_FreeURLStruct(url_struct);
     lo_unblock_script_tag(context, TRUE);

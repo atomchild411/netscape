@@ -6755,6 +6755,18 @@ XP_TRACE(("lo_LayoutTag(%d)\n", tag->type));
 			/* link tag */
             {
 				PA_Block buff = lo_FetchParamValue(context, tag, PARAM_REL);
+				if (getenv("NS_LINK_TRACE")) {
+					extern void qjs_Log(const char *fmt, ...);
+					PA_Block h = lo_FetchParamValue(context, tag, PARAM_HREF);
+					qjs_Log("link: rel %s href %s hide %d sheets %d libcss %d",
+							buff ? (char *) buff : "-", h ? (char *) h : "-",
+							(int) state->hide_content,
+							(int) LO_StyleSheetsEnabled(context),
+							(int) (state->top_state && state->top_state->style_stack &&
+								   SML_UsesLibCSS(state->top_state->style_stack)));
+					if (h)
+						PA_FREE(h);
+				}
                 if (buff != NULL)
 				{
 					if (strcasestr((char *)buff, "stylesheet")
