@@ -3385,6 +3385,9 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 	SS_Number *borderleftwidth_value;
 	char *display_prop, *align_property, *page_break_property;
 	Bool use_table_for_box=FALSE;
+	Bool is_block=FALSE;
+	char *box_bgcolor=NULL;
+	SS_Number *box_height=NULL;
 	int32 left_margin_offset=0, right_margin_offset=0;
 	Bool is_table_relayout_begin_dummy_tag=FALSE;
 
@@ -3466,6 +3469,12 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 
 	}
 	XP_FREEIF(display_prop);
+	{
+		char *bb = STYLESTRUCT_GetString(style_struct, BLOCKBOX_STYLE);
+
+		is_block = bb != NULL;
+		XP_FREEIF(bb);
+	}
 
 	left_margin = STYLESTRUCT_GetNumber(style_struct, LEFTMARGIN_STYLE);
 	LO_AdjustSSUnits(left_margin, LEFTMARGIN_STYLE, context, state);
@@ -3538,6 +3547,31 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 	border_style_value = STYLESTRUCT_GetString(style_struct, BORDER_STYLE_STYLE);
 	border_color_value = STYLESTRUCT_GetString(style_struct, BORDER_COLOR_STYLE);
 
+	/* A block's background colour and height need its box as well (the
+	 * body's background is the document's). */
+	if(is_block && tag->type != P_BODY)
+	{
+		box_bgcolor = STYLESTRUCT_GetString(style_struct, BG_COLOR_STYLE);
+		if(box_bgcolor && !strcasecomp(box_bgcolor, "transparent"))
+		{
+			XP_FREE(box_bgcolor);
+			box_bgcolor = NULL;
+		}
+		box_height = STYLESTRUCT_GetNumber(style_struct, HEIGHT_STYLE);
+		if(box_height && box_height->units && !strcasecomp(box_height->units, "%"))
+		{
+			/* of a containing block whose height is not known here */
+			STYLESTRUCT_FreeSSNumber(style_struct, box_height);
+			box_height = NULL;
+		}
+		LO_AdjustSSUnits(box_height, HEIGHT_STYLE, context, state);
+		if(box_height && box_height->value <= 0)
+		{
+			STYLESTRUCT_FreeSSNumber(style_struct, box_height);
+			box_height = NULL;
+		}
+	}
+
 	/* do backgrounds and floats using tables */
 	if(!(tag->type == P_TABLE
          || tag->type == P_TABLE_DATA
@@ -3545,6 +3579,8 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
          || tag->type == P_TABLE_ROW)  /* never create a table for these tags */
        && (align_value 
            || bgimage_value
+           || box_bgcolor
+           || box_height
 		   || (borderwidth_value && borderwidth_value->value > 0)
 		   || (bordertopwidth_value && bordertopwidth_value->value > 0)
 		   || (borderbottomwidth_value && borderbottomwidth_value->value > 0)
@@ -3553,8 +3589,13 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 	{
 		use_table_for_box = TRUE;
 
-		/* use a solid border as the default */
-		if(!border_style_value)
+		/* use a solid border as the default (if there is one) */
+		if(!border_style_value
+		   && ((borderwidth_value && borderwidth_value->value > 0)
+			   || (bordertopwidth_value && bordertopwidth_value->value > 0)
+			   || (borderbottomwidth_value && borderbottomwidth_value->value > 0)
+			   || (borderrightwidth_value && borderrightwidth_value->value > 0)
+			   || (borderleftwidth_value && borderleftwidth_value->value > 0)))
 			border_style_value = XP_STRDUP("solid");
 	}
 	else
@@ -3756,7 +3797,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
         char *bottompad_attr=NULL;
         char *leftpad_attr=NULL;
         char *rightpad_attr=NULL;
-        char *cellspace_attr=NULL;
+        char *cellspace_attr="0"; /* the box is the cell: no spacing */
         char *cols_attr=NULL;
 
 		/* begin table row attributes */
@@ -3769,7 +3810,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
         char * nowrap_attr= NULL;
 		char * cell_bgcolor_attr= NULL;
         char * cell_bgimage_attr=lo_ParseStyleSheetURL(bgimage_value);
-        char * cell_valign_attr= NULL;
+        char * cell_valign_attr= "TOP"; /* a block starts at its top */
         char * cell_halign_attr= NULL;
         char * cell_width_attr= NULL;
         char * cell_height_attr= NULL;
@@ -3781,12 +3822,34 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
          * if right_margin == 5000 then the margin is really unknown and we cant
          * do correct margin calculations
 		 */
-        if(text_width || (state->right_margin != 5000 && (right_margin || left_margin)))
+        /* (a block's box is as wide as it can be; a float's fits its
+         * content) */
+        if(text_width || (state->right_margin != 5000
+                          && (right_margin || left_margin || !align_value)))
 		{
 			int32 table_width = state->right_margin - state->left_margin;
 			
-			if(text_width && table_width > text_width->value)
-				table_width = (int32)text_width->value;
+			if(text_width)
+			{
+				/* the CSS width is the content's: the table's has the
+				 * padding and the borders as well */
+				int32 w = (int32)text_width->value;
+				SS_Number *bl = borderleftwidth_value ? borderleftwidth_value
+													  : borderwidth_value;
+				SS_Number *br = borderrightwidth_value ? borderrightwidth_value
+													   : borderwidth_value;
+
+				if(left_padding && left_padding->value > 0)
+					w += (int32)left_padding->value;
+				if(right_padding && right_padding->value > 0)
+					w += (int32)right_padding->value;
+				if(bl && bl->value > 0)
+					w += (int32)bl->value;
+				if(br && br->value > 0)
+					w += (int32)br->value;
+				if(table_width > w)
+					table_width = w;
+			}
 
 			width_attr = PR_smprintf("%ld", table_width);
 		}
@@ -3817,6 +3880,9 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 
 		if(borderwidth_value)
 			border_attr = PR_smprintf("%ld", (int32)borderwidth_value->value);
+		else if(!bordertopwidth_value && !borderbottomwidth_value
+				&& !borderleftwidth_value && !borderrightwidth_value)
+			border_attr = PR_smprintf("0");	/* exactly the box: no spacing */
 		if(bordertopwidth_value)
 			border_top_attr = PR_smprintf("%ld", (int32)bordertopwidth_value->value);
 		if(borderbottomwidth_value)
@@ -3834,6 +3900,34 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 		    bgcolor_attr = NULL;
         }
 	
+		/* the CSS height is the content's: the table's has the padding
+		 * and the borders as well */
+		if(box_height)
+		{
+			int32 h = (int32)box_height->value;
+			SS_Number *bt = bordertopwidth_value ? bordertopwidth_value
+												 : borderwidth_value;
+			SS_Number *bb = borderbottomwidth_value ? borderbottomwidth_value
+													: borderwidth_value;
+
+			if(toppad_attr)
+				h += atol(toppad_attr);
+			if(bottompad_attr)
+				h += atol(bottompad_attr);
+			if(bt && bt->value > 0)
+				h += (int32)bt->value;
+			if(bb && bb->value > 0)
+				h += (int32)bb->value;
+			height_attr = PR_smprintf("%ld", h);
+		}
+
+		if(lo_TableTrace())
+			fprintf(lo_TableTrace(), "box: width %s height %s border %s cellpad %s cellspace %s pads %s/%s/%s/%s",
+					  width_attr ? width_attr : "-", height_attr ? height_attr : "-",
+					  border_attr ? border_attr : "-", cellpad_attr ? cellpad_attr : "-",
+					  cellspace_attr ? cellspace_attr : "-",
+					  toppad_attr ? toppad_attr : "-", rightpad_attr ? rightpad_attr : "-",
+					  bottompad_attr ? bottompad_attr : "-", leftpad_attr ? leftpad_attr : "-"), fputc(10, lo_TableTrace());
 		/* mark that we are in a table */
 		STYLESTRUCT_SetString(style_struct, STYLE_NEED_TO_POP_TABLE, "1", 0);
 
@@ -3849,7 +3943,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
                         border_style_attr,
                         vspace_attr,
                         hspace_attr,
-                        bgcolor_attr,
+                        NULL, /* the cell paints it */
                         NULL,   /* Backdrop URL */
                         width_attr,
                         height_attr,
@@ -3862,12 +3956,17 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
                         cols_attr);
 
 		XP_FREEIF(width_attr);
+		XP_FREEIF(height_attr);
 
 		if(state->sub_state)
 			state = state->sub_state;
 
 	    if(state->current_table)
 		{
+			/* a bordered box is the one cell inside the table's border:
+			 * no cell border of its own (laytable.c's TABLE_BORDERS_GONE) */
+			if(state->current_table->draw_borders > 0)
+				state->current_table->draw_borders = -1;
 
 			/* change the vertical alignment to top so that top and bottom 
 			 * margins work correctly.  "Center" seems to be the default
@@ -3878,7 +3977,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 			lo_BeginTableRowAttributes(context,
                             			state,
                             			state->current_table,
-                            			bgcolor_attr,
+                            			NULL, /* the cell paints it */
                                         NULL, /* Backdrop URL */
                             			row_valign_attr,
                             			row_halign_attr);
@@ -3897,7 +3996,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
                             				colspan_attr,
                             				rowspan_attr,
                             				nowrap_attr,
-                            				cell_bgcolor_attr,
+                            				bgcolor_attr, /* the box's background, to its edges */
                                             cell_bgimage_attr, /* Backdrop URL */
                                             LO_TILE_BOTH, /* Backdrop tiling mode */
                             				cell_valign_attr,
@@ -3905,7 +4004,9 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
                             				cell_width_attr,
                             				cell_height_attr,
                             				is_a_header,
-											FALSE);  /* no cell borders */
+											TRUE);  /* the table's mode: for a
+											 * box, no cell border and no
+											 * space around the cell */
 			}
 		}
 
@@ -3944,6 +4045,9 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
     XP_FREEIF(bgimage_value);
 	XP_FREEIF(border_style_value);
 	XP_FREEIF(border_color_value);
+	XP_FREEIF(box_bgcolor);
+	STYLESTRUCT_FreeSSNumber(style_struct, box_height);
+	STYLESTRUCT_FreeSSNumber(style_struct, borderwidth_value);
 	
 	STYLESTRUCT_FreeSSNumber(style_struct, right_margin);
 	STYLESTRUCT_FreeSSNumber(style_struct, left_margin);

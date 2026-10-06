@@ -46,14 +46,15 @@ fe_ft_now(void)
 #include FT_FREETYPE_H
 #include <X11/Xutil.h>
 
-#define FT_FACES	13		/* 3 families x 4 styles + the fallback */
+#define FT_FACES	14		/* 3 families x 4 styles + the fallback + Ahem */
 #define FT_FALLBACK	12
+#define FT_AHEM		13		/* the CSS test suites' font, if it is there */
 
 static const char *const fe_ft_files[FT_FACES] = {
 	"Arimo-Regular.ttf", "Arimo-Bold.ttf", "Arimo-Italic.ttf", "Arimo-BoldItalic.ttf",
 	"Tinos-Regular.ttf", "Tinos-Bold.ttf", "Tinos-Italic.ttf", "Tinos-BoldItalic.ttf",
 	"Cousine-Regular.ttf", "Cousine-Bold.ttf", "Cousine-Italic.ttf", "Cousine-BoldItalic.ttf",
-	"DejaVuSans.ttf"
+	"DejaVuSans.ttf", "Ahem.ttf"
 };
 
 typedef struct fe_FTGlyph {
@@ -185,6 +186,15 @@ fe_ft_family(const char *name, int fontmask)
 	return 0;
 }
 
+/* Does the font-family list name Ahem first (before any family we have)? */
+static XP_Bool
+fe_ft_names_ahem(const char *name)
+{
+	while (*name == ' ' || *name == '"' || *name == '\'')
+		name++;
+	return !strncasecomp(name, "ahem", 4);
+}
+
 /* Pixels for HTML's font sizes 1..7 (the usual 16px at 3). */
 static const int fe_ft_html_px[8] = { 16, 10, 13, 16, 18, 24, 32, 48 };
 
@@ -203,6 +213,9 @@ fe_FTLoadFont(MWContext *context, const char *family, int points, int sizeNum,
 		((fontmask & LO_FONT_ITALIC) ? 2 : 0);
 	if (!fe_ft_face[face])
 		face &= ~3;
+	/* Ahem (the W3C test suites' font): all styles in its one face */
+	if (family && fe_ft_face[FT_AHEM] && fe_ft_names_ahem(family))
+		face = FT_AHEM;
 	if (points > 0) {
 		double ppp = context && context->YpixelsPerPoint > 0 ?
 			context->YpixelsPerPoint : 1.0;

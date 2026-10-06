@@ -6957,6 +6957,11 @@ fprintf(stderr, "lo_EndTable called\n");
 			(int)relayout_pass, (long)width_limit);
 		for (sp = table->width_spans; sp; sp = sp->next)
 			fprintf(f, " %ld/%ld", (long)sp->dim, (long)sp->min_dim);
+		fprintf(f, " borders=%d pads=%ld/%ld/%ld/%ld inter=%ld w=%ld h=%ld",
+			(int)table->draw_borders, (long)table->inner_top_pad,
+			(long)table->inner_right_pad, (long)table->inner_bottom_pad,
+			(long)table->inner_left_pad, (long)table->inter_cell_pad,
+			(long)table->width, (long)table->height);
 		fprintf(f, "\n");
 		fflush(f);
 	}

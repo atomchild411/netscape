@@ -1004,6 +1004,10 @@ NET_ParseContentTypeHeader(MWContext *context, char *value, URL_Struct *URL_s, P
 	first_arg = strtok(value, ";");
 
 	StrAllocCopy(URL_s->content_type, XP_StripLine(value));
+	/* XHTML is read as HTML (there is no XML parser for documents) */
+	if(URL_s->content_type
+	   && !PL_strcasecmp(URL_s->content_type, "application/xhtml+xml"))
+		StrAllocCopy(URL_s->content_type, TEXT_HTML);
 	TRACEMSG(("Found content_type: %s",URL_s->content_type));
    
 	/* assign and compare

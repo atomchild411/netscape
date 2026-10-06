@@ -68,6 +68,7 @@
 #define IMGWIDTH_PROP			"nsImageWidth"
 #define IMGHEIGHT_PROP			"nsImageHeight"
 #define HEIGHT_PROP				"height"
+#define BLOCKBOX_PROP			"nsBlockBox"	/* a block-level box */
 #define BORDERTOPWIDTH_PROP		"borderTopWidth"
 #define BORDERRIGHTWIDTH_PROP	"borderRightWidth"
 #define BORDERBOTTOMWIDTH_PROP	"borderBottomWidth"
@@ -1434,6 +1435,28 @@ NSCSS_AddSheet(NSCSS_Doc *doc, const char *url, const char *charset,
 
 	if (!doc || !data)
 		return;
+	{
+		/* XHTML's <style><![CDATA[ ... ]]></style>: an XML parser would
+		 * have taken the markers away; ours leaves them in the sheet */
+		int32 i = 0;
+
+		while (i < len && isspace((unsigned char) data[i]))
+			i++;
+		if (len - i >= 9 && !strncmp(data + i, "<![CDATA[", 9)) {
+			char *c = (char *) XP_ALLOC(len + 1), *end;
+
+			if (c) {
+				memcpy(c, data, len);
+				c[len] = '\0';
+				memset(c + i, ' ', 9);
+				if ((end = strstr(c + i, "]]>")) != NULL)
+					memset(end, ' ', 3);
+				NSCSS_AddSheet(doc, url, charset, media, c, len);
+				XP_FREE(c);
+				return;
+			}
+		}
+	}
 	if (nscss_log_open()) {
 		fprintf(nscss_log, "sheet %s media \"%s\" %ld bytes\n",
 				url ? url : "(inline)", media ? media : "", (long) len);
@@ -2160,6 +2183,8 @@ nscss_export_box(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	css_unit unit;
 	css_color c;
 	uint8_t t;
+
+	nscss_set(style, BLOCKBOX_PROP, "1");
 
 	/* Margins ("auto" would read as 0px: leave it to layout). */
 	t = css_computed_margin_top(st, &len, &unit);

@@ -596,8 +596,12 @@ lo_DisplaySubDoc(MWContext *context, LO_SubDocStruct *subdoc)
 void
 lo_DisplayCell(MWContext *context, LO_CellStruct *cell)
 {
-	/* If this cell is empty, bail */
-	if (cell->cell_list == NULL && cell->cell_float_list == NULL)
+	/* An empty cell still shows its background and borders (CSS's
+	 * empty-cells: show; and a box made from a styled DIV is a cell);
+	 * one with nothing to show is passed over. */
+	if (cell->cell_list == NULL && cell->cell_float_list == NULL
+		&& cell->backdrop.bg_color == NULL && cell->backdrop.url == NULL
+		&& cell->border_width == 0)
 		return;
 
 	if (context->compositor && cell->cell_bg_layer)

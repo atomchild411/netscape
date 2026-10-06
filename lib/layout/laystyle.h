@@ -103,6 +103,7 @@ extern XP_Bool LO_IsStyledUnknownTag(lo_DocState *state, PA_Tag *tag, XP_Bool *i
 #define WIDTH_STYLE			"width"
 #define LAYER_WIDTH_STYLE               "_layer_width" /* Bogus style used for layer widths */
 #define HEIGHT_STYLE			"height"
+#define BLOCKBOX_STYLE			"nsBlockBox"	/* nscss: a block-level box */
 
 #define HORIZONTAL_ALIGN_STYLE	"align"   /* css float property */
 #define CLEAR_STYLE				"clear"
