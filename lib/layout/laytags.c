@@ -3376,7 +3376,9 @@ lo_flex_container_begin(MWContext *context, lo_DocState *state,
 	SS_Number *gap;
 
 	table->flex = !strcmp(flex, "row-reverse") ? LO_FLEX_ROW_REVERSE
-											   : LO_FLEX_ROW;
+		: !strcmp(flex, "column") ? LO_FLEX_COLUMN
+		: !strcmp(flex, "column-reverse") ? LO_FLEX_COLUMN_REVERSE
+		: LO_FLEX_ROW;
 	table->flex_justify = LO_FLEX_JUSTIFY_START;
 	if ((v = STYLESTRUCT_GetString(style_struct, FLEXJUSTIFY_STYLE)) != NULL)
 	{
@@ -3393,9 +3395,12 @@ lo_flex_container_begin(MWContext *context, lo_DocState *state,
 		XP_FREE(v);
 	}
 	table->flex_stretch = TRUE;
+	table->flex_align_items = LO_FLEX_ALIGN_STRETCH;
 	if ((v = STYLESTRUCT_GetString(style_struct, FLEXALIGN_STYLE)) != NULL)
 	{
 		table->flex_stretch = FALSE;	/* start, center, end, baseline */
+		table->flex_align_items = !strcmp(v, "center") ? LO_FLEX_ALIGN_CENTER
+			: !strcmp(v, "end") ? LO_FLEX_ALIGN_END : LO_FLEX_ALIGN_START;
 		XP_FREE(v);
 	}
 	table->flex_wrap = 0;
@@ -3455,6 +3460,28 @@ lo_flex_nested_begin(MWContext *context, lo_DocState *state,
 	return state;
 }
 
+/* An item's padding: left and right, or (VERTICAL) top and bottom. */
+static int32
+lo_flex_pads(MWContext *context, lo_DocState *state, StyleStruct *style_struct,
+			 Bool vertical)
+{
+	char *names[2];
+	int32 sum = 0, i;
+	SS_Number *num;
+
+	names[0] = vertical ? TOPPADDING_STYLE : LEFTPADDING_STYLE;
+	names[1] = vertical ? BOTTOMPADDING_STYLE : RIGHTPADDING_STYLE;
+	for (i = 0; i < 2; i++)
+	{
+		num = STYLESTRUCT_GetNumber(style_struct, names[i]);
+		LO_AdjustSSUnits(num, names[i], context, state);
+		if (num && num->value > 0)
+			sum += (int32)num->value;
+		STYLESTRUCT_FreeSSNumber(style_struct, num);
+	}
+	return sum;
+}
+
 /*
  * A flex item (nscss's nsFlexItem: "grow shrink basis") in a flex table
  * (a flex container's, lo_SetStyleSheetBoxProperties): its own cell of the
@@ -3497,8 +3524,9 @@ lo_flex_item_begin(MWContext *context, lo_DocState *state,
 	}
 	if (basis_px < 0 && (!basis[0] || !strcmp(basis, "auto")))
 	{
-		/* auto: the item's width, if it has one */
-		num = STYLESTRUCT_GetNumber(style_struct, WIDTH_STYLE);
+		/* auto: the item's width (a column's: its height), if it has one */
+		num = STYLESTRUCT_GetNumber(style_struct, LO_FLEX_IS_COLUMN(table)
+									? HEIGHT_STYLE : WIDTH_STYLE);
 		if (num && !(num->units && !strcasecomp(num->units, "%")))
 		{
 			LO_AdjustSSUnits(num, WIDTH_STYLE, context, state);
@@ -3509,17 +3537,34 @@ lo_flex_item_begin(MWContext *context, lo_DocState *state,
 	}
 	if (basis_px >= 0)
 	{
-		/* the cell's width: with the item's padding */
-		num = STYLESTRUCT_GetNumber(style_struct, LEFTPADDING_STYLE);
-		LO_AdjustSSUnits(num, LEFTPADDING_STYLE, context, state);
-		if (num && num->value > 0)
-			basis_px += (int32)num->value;
+		/* the cell's size: with the item's padding */
+		basis_px += lo_flex_pads(context, state, style_struct,
+								 LO_FLEX_IS_COLUMN(table));
+	}
+	table->flex_next_cross = -1;
+	table->flex_next_align = LO_FLEX_ALIGN_STRETCH;
+	if (LO_FLEX_IS_COLUMN(table))
+	{
+		/* a column's item: its width, and how it is aligned across */
+		num = STYLESTRUCT_GetNumber(style_struct, WIDTH_STYLE);
+		if (num && !(num->units && !strcasecomp(num->units, "%")))
+		{
+			LO_AdjustSSUnits(num, WIDTH_STYLE, context, state);
+			if (num->value >= 0)
+				table->flex_next_cross = (int32)num->value +
+					lo_flex_pads(context, state, style_struct, FALSE);
+		}
 		STYLESTRUCT_FreeSSNumber(style_struct, num);
-		num = STYLESTRUCT_GetNumber(style_struct, RIGHTPADDING_STYLE);
-		LO_AdjustSSUnits(num, RIGHTPADDING_STYLE, context, state);
-		if (num && num->value > 0)
-			basis_px += (int32)num->value;
-		STYLESTRUCT_FreeSSNumber(style_struct, num);
+		table->flex_next_align = table->flex_align_items;
+		self = STYLESTRUCT_GetString(style_struct, FLEXALIGNSELF_STYLE);
+		if (self)
+		{
+			table->flex_next_align = !strcmp(self, "center") ? LO_FLEX_ALIGN_CENTER
+				: !strcmp(self, "end") ? LO_FLEX_ALIGN_END
+				: !strcmp(self, "stretch") ? LO_FLEX_ALIGN_STRETCH
+				: LO_FLEX_ALIGN_START;
+			XP_FREE(self);
+		}
 	}
 	table->flex_next_grow = grow;
 	table->flex_next_shrink = shrink;
@@ -3546,6 +3591,13 @@ lo_flex_item_begin(MWContext *context, lo_DocState *state,
 	if (num && !(num->units && !strcasecomp(num->units, "%")))
 		*stretched = FALSE;
 	STYLESTRUCT_FreeSSNumber(style_struct, num);
+	/* a column's item: its cell is exactly its box (its width across,
+	 * its size along the column) */
+	if (LO_FLEX_IS_COLUMN(table))
+	{
+		*stretched = TRUE;
+		valign = "top";
+	}
 
 	/* a stretched item's background fills the row's height: the cell's;
 	 * another's is its own box in the cell (as high as its content) */
@@ -3790,7 +3842,11 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 	 * body's background is the document's). */
 	if(is_block)
 		flex_value = STYLESTRUCT_GetString(style_struct, FLEX_STYLE);
-	if(is_block && tag->type != P_BODY && !(is_flex_item && flex_stretched))
+	/* (not a P: a paragraph is closed by the next one from under its
+	 * style, and closing a box table there replays tags that change the
+	 * style stack under LO_PopStyleTagByIndex) */
+	if(is_block && tag->type != P_BODY && tag->type != P_PARAGRAPH
+	   && !(is_flex_item && flex_stretched))
 	{
 		box_bgcolor = STYLESTRUCT_GetString(style_struct, BG_COLOR_STYLE);
 		if(box_bgcolor && !strcasecomp(box_bgcolor, "transparent"))

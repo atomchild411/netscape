@@ -285,6 +285,8 @@ typedef struct lo_TableCell_struct {
 	double flex_grow, flex_shrink;
 	int32 flex_basis;		/* its outer width, or -1: its content's */
 	int32 flex_order;		/* order */
+	int32 flex_cross;		/* a column's item: its width, or -1 */
+	intn flex_align;		/* a column's item: LO_FLEX_ALIGN_* */
 } lo_TableCell;
 
 
@@ -354,6 +356,7 @@ typedef struct lo_TableRec_struct {
 	intn flex_justify;		/* LO_FLEX_JUSTIFY_* */
 	int32 flex_gap;			/* column-gap */
 	Bool flex_stretch;		/* align-items: stretch */
+	intn flex_align_items;	/* LO_FLEX_ALIGN_* (a column's) */
 	intn flex_wrap;			/* flex-wrap: 0, 1 wrap, 2 wrap-reverse */
 	/* the layout (lo_flex_widths, lo_flex_cross): per item its line and
 	 * x; per line its y and height (all from the table's content edge) */
@@ -368,11 +371,21 @@ typedef struct lo_TableRec_struct {
 	/* for the next cell begun: its item's flex */
 	double flex_next_grow, flex_next_shrink;
 	int32 flex_next_basis, flex_next_order;
+	int32 flex_next_cross;
+	intn flex_next_align;
 } lo_TableRec;
 
 #define LO_FLEX_NONE		0
 #define LO_FLEX_ROW			1
 #define LO_FLEX_ROW_REVERSE	2
+#define LO_FLEX_COLUMN		3
+#define LO_FLEX_COLUMN_REVERSE	4
+#define LO_FLEX_IS_COLUMN(t)	((t)->flex >= LO_FLEX_COLUMN)
+
+#define LO_FLEX_ALIGN_STRETCH	0
+#define LO_FLEX_ALIGN_START		1
+#define LO_FLEX_ALIGN_CENTER	2
+#define LO_FLEX_ALIGN_END		3
 
 #define LO_FLEX_JUSTIFY_START	0
 #define LO_FLEX_JUSTIFY_END		1

@@ -3663,7 +3663,11 @@ lo_BeginTableCellAttributes(MWContext *context,
 	table_cell->flex_shrink = table->flex_next_shrink;
 	table_cell->flex_basis = table->flex_next_basis;
 	table_cell->flex_order = table->flex_next_order;
+	table_cell->flex_cross = table->flex_next_cross;
+	table_cell->flex_align = table->flex_next_align;
 	table->flex_next_order = 0;
+	table->flex_next_cross = -1;
+	table->flex_next_align = LO_FLEX_ALIGN_STRETCH;
 	table->flex_next_grow = 0;
 	table->flex_next_shrink = 1;
 	table->flex_next_basis = -1;
@@ -5021,8 +5025,11 @@ lo_BeginTableAttributes(MWContext *context,
 	table->flex_justify = LO_FLEX_JUSTIFY_START;
 	table->flex_gap = 0;
 	table->flex_stretch = TRUE;
+	table->flex_align_items = LO_FLEX_ALIGN_STRETCH;
 	table->flex_wrap = 0;
 	table->flex_next_order = 0;
+	table->flex_next_cross = -1;
+	table->flex_next_align = LO_FLEX_ALIGN_STRETCH;
 	table->flex_items = 0;
 	table->flex_line = NULL;
 	table->flex_x = NULL;
@@ -6712,6 +6719,7 @@ lo_flex_widths(lo_TableRec *table, lo_cell_data XP_HUGE *cell_array,
 	lo_TableCell *cell;
 	int32 n = 0, avail, i, k, start, line = 0;
 	int32 base[256], hyp[256], minw[256], fin[256], ord[256], seq[256];
+	int32 dimw[256], crossw[256], alignv[256];
 	double grow[256], shrink[256];
 
 	for (sp = table->width_spans; sp != NULL && n < 256; sp = sp->next, n++)
@@ -6726,6 +6734,9 @@ lo_flex_widths(lo_TableRec *table, lo_cell_data XP_HUGE *cell_array,
 		grow[n] = cell ? cell->flex_grow : 0;
 		shrink[n] = cell ? cell->flex_shrink : 1;
 		ord[n] = cell ? cell->flex_order : 0;
+		dimw[n] = sp->dim;
+		crossw[n] = cell ? cell->flex_cross : -1;
+		alignv[n] = cell ? cell->flex_align : LO_FLEX_ALIGN_STRETCH;
 	}
 	table->flex_items = n;
 	/* the items in their order (order, then the document's) */
@@ -6750,6 +6761,39 @@ lo_flex_widths(lo_TableRec *table, lo_cell_data XP_HUGE *cell_array,
 	avail = width_limit - 2 * cell_pad
 		- table->table_ele->border_left_width
 		- table->table_ele->border_right_width;
+
+	if (LO_FLEX_IS_COLUMN(table))
+	{
+		/* a column: each item its own line; across, stretched to the
+		 * width, or its own width (or its content's), aligned */
+		for (k = 0; k < n; k++)
+		{
+			int32 item = seq[k], w, x = 0;
+
+			if (crossw[item] >= 0)
+				w = crossw[item];
+			else if (alignv[item] == LO_FLEX_ALIGN_STRETCH)
+				w = avail;
+			else
+				w = dimw[item] < avail ? dimw[item] : avail;
+			if (alignv[item] == LO_FLEX_ALIGN_CENTER)
+				x = (avail - w) / 2;
+			else if (alignv[item] == LO_FLEX_ALIGN_END)
+				x = avail - w;
+			fin[item] = w;
+			table->flex_x[item] = cell_pad + x;
+			table->flex_line[item] = k;
+		}
+		table->flex_lines = n;
+		for (sp = table->width_spans, i = 0; sp != NULL && i < n;
+			 sp = sp->next, i++)
+		{
+			sp->dim = fin[i];
+			if (sp->min_dim > fin[i])
+				sp->min_dim = fin[i];
+		}
+		return;
+	}
 
 	{
 		/* in display order (seq): P* are the items' values there */
@@ -6849,6 +6893,86 @@ lo_flex_widths(lo_TableRec *table, lo_cell_data XP_HUGE *cell_array,
 }
 
 /*
+ * A column's items along it, once laid out at their widths: base sizes from
+ * flex-basis (or the height, or the content), the container's free height
+ * (if it has a height) shared by flex-grow or taken back by flex-shrink
+ * (never below the content), then justify-content; each item is its own
+ * line (table->flex_line, in display order).
+ */
+static void
+lo_flex_column(lo_TableRec *table, lo_cell_data XP_HUGE *cell_array,
+			   lo_TableCell *blank_cell)
+{
+	int32 n = table->flex_items, i, k, sum = 0, space, left, y;
+	int32 pb[256], ph[256], pm[256], pf[256], item_at[256];
+	double pg[256], ps[256];
+	int32 lead = 0, between = 0, height;
+
+	if (n > 256)
+		n = 256;
+	for (i = 0; i < n; i++)
+	{
+		lo_TableCell *cell = (i < table->cols) ? cell_array[i].cell : NULL;
+		int32 h = 0;
+
+		k = table->flex_line[i];
+		if (k < 0 || k >= n)
+			continue;
+		item_at[k] = i;
+		if (cell == blank_cell)
+			cell = NULL;
+		if (cell)
+		{
+			h = cell->cell ? cell->cell->height : cell->height;
+			if (cell->height > h)
+				h = cell->height;
+		}
+		pb[k] = (cell && cell->flex_basis >= 0) ? cell->flex_basis : h;
+		pm[k] = h;
+		ph[k] = pb[k] > pm[k] ? pb[k] : pm[k];
+		pg[k] = cell ? cell->flex_grow : 0;
+		ps[k] = cell ? cell->flex_shrink : 1;
+	}
+	height = table->height > 0 ? table->height
+		- table->table_ele->border_top_width
+		- table->table_ele->border_bottom_width : -1;
+	for (k = 0; k < n; k++)
+		sum += ph[k];
+	space = height >= 0 ? height - (n - 1) * table->flex_gap
+		: sum;
+	lo_flex_resolve(0, n, space, pb, ph, pm, pg, ps, pf);
+	sum = 0;
+	for (k = 0; k < n; k++)
+		sum += pf[k];
+	left = space - sum;
+	if (left > 0)
+	{
+		switch (table->flex_justify)
+		{
+		case LO_FLEX_JUSTIFY_END: lead = left; break;
+		case LO_FLEX_JUSTIFY_CENTER: lead = left / 2; break;
+		case LO_FLEX_JUSTIFY_BETWEEN: if (n > 1) between = left / (n - 1); break;
+		case LO_FLEX_JUSTIFY_AROUND: between = left / n; lead = between / 2; break;
+		case LO_FLEX_JUSTIFY_EVENLY: between = left / (n + 1); lead = between; break;
+		default: break;
+		}
+	}
+	y = lead;
+	for (k = 0; k < n; k++)
+	{
+		table->flex_line_h[k] = pf[k];
+		/* column-reverse: from the bottom */
+		table->flex_line_y[k] = table->flex == LO_FLEX_COLUMN_REVERSE
+			? (height >= 0 ? height : sum) - y - pf[k] : y;
+		y += pf[k] + table->flex_gap + between;
+	}
+	table->height_spans->dim = height > y ? height : y;
+	if (lo_TableTrace())
+		fprintf(lo_TableTrace(), "flex column %p: %ld items, %ld high\n",
+			(void *)table, (long)n, (long)table->height_spans->dim);
+}
+
+/*
  * The lines' heights, once the items are laid out at their widths: each
  * line as high as its highest item (a single line: at least the
  * container's height), one below the other.  The table's one row is then
@@ -6862,6 +6986,11 @@ lo_flex_cross(lo_TableRec *table, lo_cell_data XP_HUGE *cell_array,
 
 	if (table->flex_items == 0 || !table->height_spans)
 		return;
+	if (LO_FLEX_IS_COLUMN(table))
+	{
+		lo_flex_column(table, cell_array, blank_cell);
+		return;
+	}
 	for (l = 0; l < table->flex_lines; l++)
 		table->flex_line_h[l] = 0;
 	for (i = 0; i < table->flex_items && i < table->cols; i++)

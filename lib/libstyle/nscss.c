@@ -159,7 +159,7 @@ struct NSCSS_Node {
 
 #define NSCSS_FLEX_NONE		0
 #define NSCSS_FLEX_ROW		1	/* layout's flex table (laytable.c) */
-#define NSCSS_FLEX_COLUMN	2	/* blocks one below the other */
+#define NSCSS_FLEX_COLUMN	2	/* likewise, in a column */
 
 static css_select_handler nscss_handler;
 
@@ -1997,9 +1997,12 @@ nscss_export_flex_container(NSCSS_Doc *doc, const css_computed_style *st,
 	css_fixed len;
 	css_unit unit;
 
-	nscss_set(style, FLEX_PROP,
-			  css_computed_flex_direction(st) == CSS_FLEX_DIRECTION_ROW_REVERSE ?
-			  "row-reverse" : "row");
+	switch (css_computed_flex_direction(st)) {
+	case CSS_FLEX_DIRECTION_ROW_REVERSE: nscss_set(style, FLEX_PROP, "row-reverse"); break;
+	case CSS_FLEX_DIRECTION_COLUMN: nscss_set(style, FLEX_PROP, "column"); break;
+	case CSS_FLEX_DIRECTION_COLUMN_REVERSE: nscss_set(style, FLEX_PROP, "column-reverse"); break;
+	default: nscss_set(style, FLEX_PROP, "row"); break;
+	}
 	switch (css_computed_justify_content(st)) {
 	case CSS_JUSTIFY_CONTENT_FLEX_END: nscss_set(style, FLEXJUSTIFY_PROP, "end"); break;
 	case CSS_JUSTIFY_CONTENT_CENTER: nscss_set(style, FLEXJUSTIFY_PROP, "center"); break;
@@ -2100,8 +2103,7 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	if (node->parent && node->parent->flex != NSCSS_FLEX_NONE &&
 		css_computed_position(st) != CSS_POSITION_ABSOLUTE &&
 		css_computed_position(st) != CSS_POSITION_FIXED) {
-		if (node->parent->flex == NSCSS_FLEX_ROW)
-			nscss_export_flex_item(doc, st, style);
+		nscss_export_flex_item(doc, st, style);
 		nscss_set(style, DISPLAY_PROP, "block");
 		block = TRUE;
 		t = CSS_DISPLAY_BLOCK;
@@ -2112,8 +2114,7 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		node->flex = (fd == CSS_FLEX_DIRECTION_COLUMN ||
 					  fd == CSS_FLEX_DIRECTION_COLUMN_REVERSE) ?
 			NSCSS_FLEX_COLUMN : NSCSS_FLEX_ROW;
-		if (node->flex == NSCSS_FLEX_ROW)
-			nscss_export_flex_container(doc, st, style);
+		nscss_export_flex_container(doc, st, style);
 	}
 	/* Layout has no grid layout, nor inline flex.  A grid's items, or an
 	 * inline flex container's, flow side by side as inline content does:
