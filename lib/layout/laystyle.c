@@ -968,6 +968,13 @@ LO_PopStyleTagByIndex(MWContext *context, lo_DocState **state,
 			/* (2: a flex container's flex table in its box) */
 			for(t = 0; t < tables; t++)
 			{
+				/* the box's last line ends with it (an inline-block's
+				 * end tag does not break the line itself) */
+				if((*state)->is_a_subdoc == SUBDOC_CELL)
+				{
+					lo_FlushTextBlock(context, *state);
+					lo_SetSoftLineBreakState(context, *state, FALSE, 1);
+				}
 				lo_CloseTable(context, *state);
 
 				/* get the new current state */
@@ -1071,11 +1078,15 @@ LO_PopStyleTagByIndex(MWContext *context, lo_DocState **state,
 	}
 
 	/* apply bottom margins (not for hidden content: no box) */
-	if(bottom_margin && bottom_margin->value > 0 && !(*state)->hide_content)
+	/* (a negative one moves up: the next block's top margin is then
+	 * added to it, which is how they collapse, CSS 2.1 8.3.1) */
+	if(bottom_margin && bottom_margin->value != 0 && !(*state)->hide_content)
 	{
         int32 move_size = FEUNITS_Y((int32)bottom_margin->value, context);
         lo_SetSoftLineBreakState(context, *state, FALSE, 1);
         (*state)->y += move_size;
+        if((*state)->y < 0)
+            (*state)->y = 0;
 	}
 	STYLESTRUCT_FreeSSNumber(top_style, bottom_margin);
 

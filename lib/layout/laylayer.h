@@ -134,6 +134,9 @@ typedef struct lo_BackgroundLayerClosure {
     lo_TileMode tile_mode;
     lo_BackgroundType bg_type;
 	LO_CellStruct *cell;
+    /* background-position (lo_Backdrop's) */
+    int16 pos_x, pos_y;
+    PRPackedBool pos_x_pct, pos_y_pct;
 } lo_BackgroundLayerClosure;
 
 typedef struct lo_AnyLayerClosure {

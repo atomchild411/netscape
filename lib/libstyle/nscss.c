@@ -123,6 +123,12 @@
 #define RADIUS_PROP				"nsRadius"
 #define BOXSHADOW_PROP			"nsBoxShadow"
 #define TEXTSHADOW_PROP			"nsTextShadow"	/* "dx dy #rrggbb" */
+#define BGPOS_PROP				"nsBgPos"		/* "X Y": px or N% */
+#define INLINEBLOCK_PROP		"nsInlineBlock"	/* display: inline-block */
+/* inline-block as boxes in the line (laytable.c css_inline): not yet
+ * (a one-line box measures no height, margins move the line's margin) */
+#define NSCSS_INLINE_BLOCK_BOXES 0
+#define MARGINAUTO_PROP			"nsMarginAuto"	/* "both", "left", "right" */
 #define GRIDJUSTIFYSELF_PROP	"nsGridJustifySelf"
 #define BORDERTOPWIDTH_PROP		"borderTopWidth"
 #define BORDERRIGHTWIDTH_PROP	"borderRightWidth"
@@ -3014,6 +3020,11 @@ nscss_export_gradient(NSCSS_Doc *doc, const css_computed_style *st,
 	(void) doc;
 }
 
+/* form controls: drawn by the front end, never boxes */
+static const char *const nscss_form_tags[] = {
+	"input", "select", "textarea", "button", NULL
+};
+
 /* replaced elements: sized by the style sheet even inline */
 static const char *const nscss_replaced_tags[] = {
 	"img", "object", "embed", "video", "canvas", "iframe", NULL
@@ -3037,6 +3048,7 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	uint8_t t;
 	size_t i;
 	XP_Bool block;
+	uint8_t display;
 
 	if (!st)
 		return;
@@ -3087,9 +3099,9 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		node->flex_row = fd == CSS_FLEX_DIRECTION_ROW ||
 						 fd == CSS_FLEX_DIRECTION_ROW_REVERSE ||
 						 fd == CSS_FLEX_DIRECTION_INHERIT;
-	} else if (/* an inline block's own blocks (a details' summary, a
-			    * badge's divs) stay on its line */
-			   t == CSS_DISPLAY_INLINE_BLOCK) {
+	} else if (!NSCSS_INLINE_BLOCK_BOXES && t == CSS_DISPLAY_INLINE_BLOCK) {
+		/* an inline block's own blocks (a details' summary, a badge's
+		 * divs) stay on its line */
 		node->flex_row = TRUE;
 	}
 	if ((node->parent && node->parent->flex_row &&
@@ -3124,6 +3136,7 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	default:					/* the marker, or table parts */
 		break;
 	}
+	display = t;				/* (t is reused below) */
 
 	/* CSS tables: layout makes them of its own table parts */
 	if (!nscss_name_in(node, nscss_table_tags_x)) {
@@ -3257,6 +3270,15 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	 * and puts it where the offsets say); their box goes with them. */
 	nscss_export_position(doc, st, style);
 	if (block) {
+		nscss_set(style, BLOCKBOX_PROP, "1");	/* (blockified ones too) */
+		nscss_export_box(doc, node, st, style);
+		nscss_export_decorations(doc, st, style);
+	} else if (NSCSS_INLINE_BLOCK_BOXES &&
+			   display == CSS_DISPLAY_INLINE_BLOCK &&
+			   !nscss_name_in(node, nscss_replaced_tags) &&
+			   !nscss_name_in(node, nscss_form_tags)) {
+		/* an inline-block: its box is a table layout puts in the line */
+		nscss_set(style, INLINEBLOCK_PROP, "1");
 		nscss_export_box(doc, node, st, style);
 		nscss_export_decorations(doc, st, style);
 	}
@@ -3333,6 +3355,25 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 			default: v = "repeat"; break;
 			}
 			nscss_set(style, BGREPEAT_PROP, v);
+			{
+				css_fixed hl = 0, vl = 0;
+				css_unit hu = CSS_UNIT_PX, vu = CSS_UNIT_PX;
+				char hb[40], vb[40];
+
+				if (css_computed_background_position(st, &hl, &hu, &vl, &vu)
+					== CSS_BACKGROUND_POSITION_SET && (hl != 0 || vl != 0)) {
+					if (hu == CSS_UNIT_PCT)
+						PR_snprintf(hb, sizeof hb, "%g%%", FIXTOFLT(hl));
+					else if (!nscss_len(doc, hb, hl, hu))
+						XP_STRCPY(hb, "0px");
+					if (vu == CSS_UNIT_PCT)
+						PR_snprintf(vb, sizeof vb, "%g%%", FIXTOFLT(vl));
+					else if (!nscss_len(doc, vb, vl, vu))
+						XP_STRCPY(vb, "0px");
+					PR_snprintf(buf, sizeof buf, "%s %s", hb, vb);
+					nscss_set(style, BGPOS_PROP, buf);
+				}
+			}
 		}
 	}
 
@@ -3360,7 +3401,9 @@ nscss_export_box(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	css_color c;
 	uint8_t t;
 
-	nscss_set(style, BLOCKBOX_PROP, "1");
+	/* (a block-level box; an inline-block's is nsInlineBlock) */
+	if (css_computed_display_static(st) != CSS_DISPLAY_INLINE_BLOCK)
+		nscss_set(style, BLOCKBOX_PROP, "1");
 
 	/* Margins ("auto" would read as 0px: leave it to layout). */
 	t = css_computed_margin_top(st, &len, &unit);
@@ -3375,6 +3418,18 @@ nscss_export_box(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	t = css_computed_margin_left(st, &len, &unit);
 	nscss_box_len(doc, style, LEFTMARGIN_PROP, t, CSS_MARGIN_SET, len, unit,
 				  NSCSS_FIX_MARK_LEN);
+	/* auto horizontal margins: layout centres (or right-aligns) a block
+	 * narrower than its room */
+	{
+		css_fixed l2;
+		css_unit u2;
+		XP_Bool la = css_computed_margin_left(st, &l2, &u2) == CSS_MARGIN_AUTO;
+		XP_Bool ra = css_computed_margin_right(st, &l2, &u2) == CSS_MARGIN_AUTO;
+
+		if (la || ra)
+			nscss_set(style, MARGINAUTO_PROP,
+					  la && ra ? "both" : la ? "left" : "right");
+	}
 
 	t = css_computed_padding_top(st, &len, &unit);
 	nscss_box_len(doc, style, TOPPADDING_PROP, t, CSS_PADDING_SET, len, unit,

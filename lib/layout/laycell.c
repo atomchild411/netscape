@@ -365,8 +365,11 @@ lo_ShiftCell(LO_CellStruct *cell, int32 dx, int32 dy)
             int32 x_offset, y_offset;
             lo_GetLayerXYShift(CL_GetLayerParent(cell->cell_bg_layer),
                                &x_offset, &y_offset);
+            /* (where lo_CreateCellBackgroundLayer put it: with the
+               cell's offsets, which move it in a line) */
             CL_MoveLayer(cell->cell_bg_layer,
-                         cell->x - x_offset, cell->y - y_offset);
+                         cell->x + cell->x_offset - x_offset,
+                         cell->y + cell->y_offset - y_offset);
 			CL_ResizeLayer(cell->cell_bg_layer, cell->width, cell->height);
 			if (lo_TableTrace())
 				fprintf(lo_TableTrace(), "bg layer of cell %p: %ld,%ld %ldx%ld\n",

@@ -431,6 +431,8 @@ lo_BeginCaptionSubDoc(MWContext *context, lo_DocState *state,
 	subdoc->backdrop.bg_color = NULL;
     subdoc->backdrop.url = NULL;
     subdoc->backdrop.tile_mode = LO_TILE_BOTH;
+    subdoc->backdrop.pos_x = subdoc->backdrop.pos_y = 0;
+    subdoc->backdrop.pos_x_pct = subdoc->backdrop.pos_y_pct = FALSE;
 	subdoc->state = NULL;
 
 	subdoc->vert_alignment = LO_ALIGN_CENTER;
@@ -1045,6 +1047,8 @@ lo_BeginCellSubDoc(MWContext *context,
 	subdoc->backdrop.bg_color = NULL;
     subdoc->backdrop.url = NULL;
     subdoc->backdrop.tile_mode = LO_TILE_BOTH;
+    subdoc->backdrop.pos_x = subdoc->backdrop.pos_y = 0;
+    subdoc->backdrop.pos_x_pct = subdoc->backdrop.pos_y_pct = FALSE;
 
 	/*
 	 * May inherit a bg_color from your row.
@@ -1061,6 +1065,8 @@ lo_BeginCellSubDoc(MWContext *context,
 		subdoc->backdrop.bg_color = NULL;
 		subdoc->backdrop.url = NULL;
 		subdoc->backdrop.tile_mode = LO_TILE_BOTH;
+		subdoc->backdrop.pos_x = subdoc->backdrop.pos_y = 0;
+		subdoc->backdrop.pos_x_pct = subdoc->backdrop.pos_y_pct = FALSE;
 
 		/*
 		 * May inherit a bg_color from your row.
@@ -1230,6 +1236,8 @@ lo_BeginCellSubDoc(MWContext *context,
 					subdoc->backdrop.tile_mode = LO_TILE_VERT;
 				else 
 					subdoc->backdrop.tile_mode = LO_TILE_BOTH;
+					subdoc->backdrop.pos_x = subdoc->backdrop.pos_y = 0;
+					subdoc->backdrop.pos_x_pct = subdoc->backdrop.pos_y_pct = FALSE;
 			}
 		}
 	}	
@@ -4363,6 +4371,8 @@ lo_BeginTableRowAttributes(MWContext *context,
 	table_row->backdrop.bg_color = NULL;
     table_row->backdrop.url = NULL;
     table_row->backdrop.tile_mode = LO_TILE_BOTH;
+    table_row->backdrop.pos_x = table_row->backdrop.pos_y = 0;
+    table_row->backdrop.pos_x_pct = table_row->backdrop.pos_y_pct = FALSE;
 	/* copied to lo_UpdateTableStateForBeginRow()
 	table_row->cells = 0;
 	*/
@@ -4995,6 +5005,8 @@ lo_BeginTableAttributes(MWContext *context,
 	table->backdrop.bg_color = NULL;
     table->backdrop.url = NULL;
     table->backdrop.tile_mode = LO_TILE_BOTH;
+    table->backdrop.pos_x = table->backdrop.pos_y = 0;
+    table->backdrop.pos_x_pct = table->backdrop.pos_y_pct = FALSE;
 
 	/* Copied to lo_InitTableRecord() */
 	/*
@@ -5051,6 +5063,7 @@ lo_BeginTableAttributes(MWContext *context,
 	table->flex_next_basis = -1;
 	table->grid = NULL;
 	table->css_fixed_layout = FALSE;
+	table->css_inline = FALSE;
 	table->grid_next_lines[0] = table->grid_next_lines[1] = 0;
 	table->grid_next_lines[2] = table->grid_next_lines[3] = 0;
 	table->grid_next_justify = -1;
@@ -5061,6 +5074,8 @@ lo_BeginTableAttributes(MWContext *context,
 	table->current_subdoc->backdrop.bg_color = NULL;
     table->current_subdoc->backdrop.url = NULL;
     table->current_subdoc->backdrop.tile_mode = LO_TILE_BOTH;
+    table->current_subdoc->backdrop.pos_x = table->current_subdoc->backdrop.pos_y = 0;
+    table->current_subdoc->backdrop.pos_x_pct = table->current_subdoc->backdrop.pos_y_pct = FALSE;
 	table->current_subdoc->state = lo_NewLayout(context,
 		state->win_width, state->win_height, 0, 0, NULL);
 
@@ -8277,6 +8292,79 @@ flex_widths_done:
 		}
 
 		/*
+		 * An inline-block's table (display: inline-block): its line,
+		 * faked to lay it out, goes into the line it interrupted, at the
+		 * baseline (its bottom there, as an image's), on the next line
+		 * if it does not fit.
+		 */
+		if (table->css_inline)
+		{
+			LO_Element *first = state->line_list, *rest;
+			int32 w = table->table_ele->width;
+			int32 h = table->table_ele->height;
+			int32 dx, dy, line_inc = 0, baseline_inc = 0, y_off = 0;
+			int16 x_off = 0;
+
+			state->line_list = save_line_list;
+			state->x = save_state_x;
+			state->y = save_state_y;
+			if (state->x + w > state->right_margin &&
+				state->line_list != NULL)
+				lo_SetSoftLineBreakState(context, state, FALSE, 1);
+			lo_fillin_text_info(context, state);
+			lo_CalcAlignOffsets(state, &state->text_info, LO_ALIGN_BASELINE,
+				w, h, &x_off, &y_off, &line_inc, &baseline_inc);
+			dx = state->x - table->table_ele->x;
+			dy = state->y + y_off - table->table_ele->y;
+			if (lo_TableTrace())
+			{
+				fprintf(lo_TableTrace(), "inline %p: table %ld,%ld %ldx%ld line y %ld base %ld y_off %ld -> d %ld,%ld\n",
+					(void *)table, (long)table->table_ele->x, (long)table->table_ele->y,
+					(long)w, (long)h, (long)state->y, (long)state->baseline,
+					(long)y_off, (long)dx, (long)dy);
+				for (tptr = first; tptr != NULL; tptr = tptr->lo_any.next)
+				{
+					fprintf(lo_TableTrace(), "  ele type %d at %ld,%ld+%ld %ldx%ld",
+						(int)tptr->type, (long)tptr->lo_any.x, (long)tptr->lo_any.y,
+						(long)tptr->lo_any.y_offset, (long)tptr->lo_any.width,
+						(long)tptr->lo_any.height);
+					if (tptr->type == LO_CELL && ((LO_CellStruct *)tptr)->cell_list)
+					{
+						LO_Element *c = ((LO_CellStruct *)tptr)->cell_list;
+						fprintf(lo_TableTrace(), " first content type %d at %ld,%ld+%ld",
+							(int)c->type, (long)c->lo_any.x, (long)c->lo_any.y,
+							(long)c->lo_any.y_offset);
+					}
+					fputc('\n', lo_TableTrace());
+				}
+			}
+			for (tptr = first; tptr != NULL; tptr = tptr->lo_any.next)
+			{
+				tptr->lo_any.x += dx;
+				tptr->lo_any.y += dy;
+				if (tptr->type == LO_CELL)
+					lo_ShiftCell((LO_CellStruct *)tptr, dx, dy);
+			}
+			if (first != NULL)
+			{
+				rest = first->lo_any.next;
+				lo_AppendToLineList(context, state, first, baseline_inc);
+				first->lo_any.next = rest;
+				if (rest != NULL)
+					rest->lo_any.prev = first;
+			}
+			state->x += w;
+			state->baseline += (intn)baseline_inc;
+			state->line_height += (intn)(baseline_inc + line_inc);
+			if (state->line_height < state->baseline + line_inc)
+				state->line_height = state->baseline + line_inc;
+			state->at_begin_line = FALSE;
+			if (min_table_width > state->min_width)
+				state->min_width = min_table_width;
+			goto inline_placed;
+		}
+
+		/*
 		 * Stuff the whole line list into the float list, and
 		 * restore the line list to its pre-table state.
 		 */
@@ -8340,6 +8428,7 @@ flex_widths_done:
 
 	}
 
+inline_placed:
 	/* Decrement table nesting level (used for passing into lo_CreateCellBackGroundLayer() */
 	if (!relayout)
 	{

@@ -1146,17 +1146,49 @@ lo_background_rect_func(void *inclosure,
     /* Paint the backdrop image if there is one. */
     if (backdrop && !backdrop->is_icon && is_complete) {
         XP_Rect tile_area = CL_MAX_RECT;
+        int32 ox = closure->pos_x, oy = closure->pos_y;
 
         /* Convert to layer coordinates */
         CL_WindowToLayerRect(compositor, layer, rect);
 
+        /* background-position: a percentage of the room the image leaves
+           in the box */
+        if (closure->pos_x_pct || closure->pos_y_pct) {
+            XP_Rect bbox;
+
+            CL_GetLayerBbox(layer, &bbox);
+            if (closure->pos_x_pct)
+                ox = (int32)((bbox.right - bbox.left - backdrop->width) *
+                             closure->pos_x / 100);
+            if (closure->pos_y_pct)
+                oy = (int32)((bbox.bottom - bbox.top - backdrop->height) *
+                             closure->pos_y / 100);
+        }
+
         /* Constrain tiling area based on tiling mode */
-        if ((int)tile_mode & LO_TILE_HORIZ)
-            tile_area.bottom = backdrop->height;
-        if ((int)tile_mode & LO_TILE_VERT)
-            tile_area.right = backdrop->width;
+        if ((int)tile_mode & LO_TILE_HORIZ) {
+            tile_area.top = oy;
+            tile_area.bottom = oy + backdrop->height;
+        }
+        if ((int)tile_mode & LO_TILE_VERT) {
+            tile_area.left = ox;
+            tile_area.right = ox + backdrop->width;
+        }
 
         XP_IntersectRect(rect, &tile_area, rect);
+        /* (the image's origin moves with its position; the rectangle is
+           measured from it) */
+        if (ox || oy) {
+            if (rect->right > rect->left && rect->bottom > rect->top)
+                IL_DisplaySubImage(backdrop->image_req,
+                                   ox / context->convertPixX,
+                                   oy / context->convertPixY,
+                                   (rect->left - ox) / context->convertPixX,
+                                   (rect->top - oy) / context->convertPixY,
+                                   (rect->right - rect->left) / context->convertPixX,
+                                   (rect->bottom - rect->top) / context->convertPixY);
+            return;
+        }
 
         /* Note: if the compositor is ever used with contexts which have a
            scale factor other than unity, then all length arguments should
@@ -1674,6 +1706,10 @@ lo_CreateCellBackgroundLayer(MWContext *context, LO_CellStruct *cell,
     closure->bg_type = BG_CELL;
     closure->tile_mode = cell->backdrop.tile_mode;
     closure->cell = cell;
+    closure->pos_x = cell->backdrop.pos_x;
+    closure->pos_y = cell->backdrop.pos_y;
+    closure->pos_x_pct = cell->backdrop.pos_x_pct;
+    closure->pos_y_pct = cell->backdrop.pos_y_pct;
    
     XP_BZERO(&vtable, sizeof(CL_LayerVTable));    
     vtable.painter_func = lo_background_painter_func;

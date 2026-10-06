@@ -2608,9 +2608,14 @@ lo_AppendToLineList(MWContext *context, lo_DocState *state,
 		while (eptr->lo_any.next != NULL)
 		{
 			eptr->lo_any.y_offset += baseline_inc;
+			/* (an inline-block's cells: their content too) */
+			if (eptr->type == LO_CELL && baseline_inc)
+				lo_ShiftCell((LO_CellStruct *)eptr, 0, baseline_inc);
 			eptr = eptr->lo_any.next;
 		}
 		eptr->lo_any.y_offset += baseline_inc;
+		if (eptr->type == LO_CELL && baseline_inc)
+			lo_ShiftCell((LO_CellStruct *)eptr, 0, baseline_inc);
 		eptr->lo_any.next = element;
 		element->lo_any.prev = eptr;
 	}

@@ -137,6 +137,9 @@ extern XP_Bool LO_IsStyledUnknownTag(lo_DocState *state, PA_Tag *tag, XP_Bool *i
 #define RADIUS_STYLE			"nsRadius"		/* nscss: 8 radii, px or pN (%) */
 #define BOXSHADOW_STYLE			"nsBoxShadow"	/* "dx dy blur #rrggbbaa" */
 #define TEXTSHADOW_STYLE		"nsTextShadow"	/* "dx dy #rrggbb" */
+#define BGPOS_STYLE				"nsBgPos"		/* "X Y": px or N% */
+#define INLINEBLOCK_STYLE		"nsInlineBlock"	/* nscss: display: inline-block */
+#define MARGINAUTO_STYLE		"nsMarginAuto"	/* "both", "left", "right" */
 #define STYLE_NEED_TO_POP_ROW	"nsNeedToPopRow"
 /* nscss: generated content (::before, ::after): the text, and with
  * "Color", "Bg", "Font", "Block" after the name its styles */

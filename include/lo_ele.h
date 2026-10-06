@@ -529,6 +529,10 @@ typedef struct {
     LO_Color *bg_color;         /* Solid color, or NULL, if transparent */
     char *url;                  /* String URL or NULL, if no backdrop image */
     lo_TileMode tile_mode;      /* CSS tiling mode for backdrop image */
+    /* CSS background-position: the image's place in the box, pixels or
+       (pos_*_pct) a percentage of the room the image leaves */
+    int16 pos_x, pos_y;
+    PRPackedBool pos_x_pct, pos_y_pct;
 } lo_Backdrop;
 
 struct LO_SubDocStruct_struct {

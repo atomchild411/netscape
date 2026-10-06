@@ -1235,7 +1235,17 @@ lo_FlushLineList(MWContext *context, lo_DocState *state, uint32 break_type, uint
 		int32 css_lh = state->line_height_stack->height;
 		int32 diff = css_lh - state->line_height;
 		int32 half = diff >= 0 ? diff / 2 : -((1 - diff) / 2);
+		LO_Element *e;
+		Bool atomic = FALSE;
 
+		/* a line with images or inline-blocks is at least as high as
+		 * they are: only text lines get smaller */
+		for(e = state->line_list; e != NULL; e = e->lo_any.next)
+			if(e->type == LO_IMAGE || e->type == LO_CELL ||
+			   e->type == LO_TABLE || e->type == LO_FORM_ELE)
+				atomic = TRUE;
+		if(atomic && diff < 0)
+			css_lh = -1;
 		if(css_lh >= 0)
 		{
 			if(half != 0)

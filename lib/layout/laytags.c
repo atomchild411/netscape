@@ -671,6 +671,110 @@ lo_text_piece(MWContext *context, lo_DocState *state, char *text, int32 len)
 	PA_FREE(piece.data);
 }
 
+/* Unicode punctuation (Ps, Pe, Pi, Pf, Po; Unicode 16.0.0): CSS 2.1 5.12.2's
+ * for ::first-letter, as ranges */
+static const struct { uint32 lo, hi; } lo_punct_ranges[] = {
+	{ 0x21, 0x23 }, { 0x25, 0x2a }, { 0x2c, 0x2c }, { 0x2e, 0x2f },
+	{ 0x3a, 0x3b }, { 0x3f, 0x40 }, { 0x5b, 0x5d }, { 0x7b, 0x7b },
+	{ 0x7d, 0x7d }, { 0xa1, 0xa1 }, { 0xa7, 0xa7 }, { 0xab, 0xab },
+	{ 0xb6, 0xb7 }, { 0xbb, 0xbb }, { 0xbf, 0xbf }, { 0x37e, 0x37e },
+	{ 0x387, 0x387 }, { 0x55a, 0x55f }, { 0x589, 0x589 }, { 0x5c0, 0x5c0 },
+	{ 0x5c3, 0x5c3 }, { 0x5c6, 0x5c6 }, { 0x5f3, 0x5f4 }, { 0x609, 0x60a },
+	{ 0x60c, 0x60d }, { 0x61b, 0x61b }, { 0x61d, 0x61f }, { 0x66a, 0x66d },
+	{ 0x6d4, 0x6d4 }, { 0x700, 0x70d }, { 0x7f7, 0x7f9 }, { 0x830, 0x83e },
+	{ 0x85e, 0x85e }, { 0x964, 0x965 }, { 0x970, 0x970 }, { 0x9fd, 0x9fd },
+	{ 0xa76, 0xa76 }, { 0xaf0, 0xaf0 }, { 0xc77, 0xc77 }, { 0xc84, 0xc84 },
+	{ 0xdf4, 0xdf4 }, { 0xe4f, 0xe4f }, { 0xe5a, 0xe5b }, { 0xf04, 0xf12 },
+	{ 0xf14, 0xf14 }, { 0xf3a, 0xf3d }, { 0xf85, 0xf85 }, { 0xfd0, 0xfd4 },
+	{ 0xfd9, 0xfda }, { 0x104a, 0x104f }, { 0x10fb, 0x10fb },
+	{ 0x1360, 0x1368 }, { 0x166e, 0x166e }, { 0x169b, 0x169c },
+	{ 0x16eb, 0x16ed }, { 0x1735, 0x1736 }, { 0x17d4, 0x17d6 },
+	{ 0x17d8, 0x17da }, { 0x1800, 0x1805 }, { 0x1807, 0x180a },
+	{ 0x1944, 0x1945 }, { 0x1a1e, 0x1a1f }, { 0x1aa0, 0x1aa6 },
+	{ 0x1aa8, 0x1aad }, { 0x1b4e, 0x1b4f }, { 0x1b5a, 0x1b60 },
+	{ 0x1b7d, 0x1b7f }, { 0x1bfc, 0x1bff }, { 0x1c3b, 0x1c3f },
+	{ 0x1c7e, 0x1c7f }, { 0x1cc0, 0x1cc7 }, { 0x1cd3, 0x1cd3 },
+	{ 0x2016, 0x2027 }, { 0x2030, 0x203e }, { 0x2041, 0x2043 },
+	{ 0x2045, 0x2051 }, { 0x2053, 0x2053 }, { 0x2055, 0x205e },
+	{ 0x207d, 0x207e }, { 0x208d, 0x208e }, { 0x2308, 0x230b },
+	{ 0x2329, 0x232a }, { 0x2768, 0x2775 }, { 0x27c5, 0x27c6 },
+	{ 0x27e6, 0x27ef }, { 0x2983, 0x2998 }, { 0x29d8, 0x29db },
+	{ 0x29fc, 0x29fd }, { 0x2cf9, 0x2cfc }, { 0x2cfe, 0x2cff },
+	{ 0x2d70, 0x2d70 }, { 0x2e00, 0x2e16 }, { 0x2e18, 0x2e19 },
+	{ 0x2e1b, 0x2e2e }, { 0x2e30, 0x2e39 }, { 0x2e3c, 0x2e3f },
+	{ 0x2e41, 0x2e4f }, { 0x2e52, 0x2e5c }, { 0x3001, 0x3003 },
+	{ 0x3008, 0x3011 }, { 0x3014, 0x301b }, { 0x301d, 0x301f },
+	{ 0x303d, 0x303d }, { 0x30fb, 0x30fb }, { 0xa4fe, 0xa4ff },
+	{ 0xa60d, 0xa60f }, { 0xa673, 0xa673 }, { 0xa67e, 0xa67e },
+	{ 0xa6f2, 0xa6f7 }, { 0xa874, 0xa877 }, { 0xa8ce, 0xa8cf },
+	{ 0xa8f8, 0xa8fa }, { 0xa8fc, 0xa8fc }, { 0xa92e, 0xa92f },
+	{ 0xa95f, 0xa95f }, { 0xa9c1, 0xa9cd }, { 0xa9de, 0xa9df },
+	{ 0xaa5c, 0xaa5f }, { 0xaade, 0xaadf }, { 0xaaf0, 0xaaf1 },
+	{ 0xabeb, 0xabeb }, { 0xfd3e, 0xfd3f }, { 0xfe10, 0xfe19 },
+	{ 0xfe30, 0xfe30 }, { 0xfe35, 0xfe4c }, { 0xfe50, 0xfe52 },
+	{ 0xfe54, 0xfe57 }, { 0xfe59, 0xfe61 }, { 0xfe68, 0xfe68 },
+	{ 0xfe6a, 0xfe6b }, { 0xff01, 0xff03 }, { 0xff05, 0xff0a },
+	{ 0xff0c, 0xff0c }, { 0xff0e, 0xff0f }, { 0xff1a, 0xff1b },
+	{ 0xff1f, 0xff20 }, { 0xff3b, 0xff3d }, { 0xff5b, 0xff5b },
+	{ 0xff5d, 0xff5d }, { 0xff5f, 0xff65 }, { 0x10100, 0x10102 },
+	{ 0x1039f, 0x1039f }, { 0x103d0, 0x103d0 }, { 0x1056f, 0x1056f },
+	{ 0x10857, 0x10857 }, { 0x1091f, 0x1091f }, { 0x1093f, 0x1093f },
+	{ 0x10a50, 0x10a58 }, { 0x10a7f, 0x10a7f }, { 0x10af0, 0x10af6 },
+	{ 0x10b39, 0x10b3f }, { 0x10b99, 0x10b9c }, { 0x10f55, 0x10f59 },
+	{ 0x10f86, 0x10f89 }, { 0x11047, 0x1104d }, { 0x110bb, 0x110bc },
+	{ 0x110be, 0x110c1 }, { 0x11140, 0x11143 }, { 0x11174, 0x11175 },
+	{ 0x111c5, 0x111c8 }, { 0x111cd, 0x111cd }, { 0x111db, 0x111db },
+	{ 0x111dd, 0x111df }, { 0x11238, 0x1123d }, { 0x112a9, 0x112a9 },
+	{ 0x113d4, 0x113d5 }, { 0x113d7, 0x113d8 }, { 0x1144b, 0x1144f },
+	{ 0x1145a, 0x1145b }, { 0x1145d, 0x1145d }, { 0x114c6, 0x114c6 },
+	{ 0x115c1, 0x115d7 }, { 0x11641, 0x11643 }, { 0x11660, 0x1166c },
+	{ 0x116b9, 0x116b9 }, { 0x1173c, 0x1173e }, { 0x1183b, 0x1183b },
+	{ 0x11944, 0x11946 }, { 0x119e2, 0x119e2 }, { 0x11a3f, 0x11a46 },
+	{ 0x11a9a, 0x11a9c }, { 0x11a9e, 0x11aa2 }, { 0x11b00, 0x11b09 },
+	{ 0x11be1, 0x11be1 }, { 0x11c41, 0x11c45 }, { 0x11c70, 0x11c71 },
+	{ 0x11ef7, 0x11ef8 }, { 0x11f43, 0x11f4f }, { 0x11fff, 0x11fff },
+	{ 0x12470, 0x12474 }, { 0x12ff1, 0x12ff2 }, { 0x16a6e, 0x16a6f },
+	{ 0x16af5, 0x16af5 }, { 0x16b37, 0x16b3b }, { 0x16b44, 0x16b44 },
+	{ 0x16d6d, 0x16d6f }, { 0x16e97, 0x16e9a }, { 0x16fe2, 0x16fe2 },
+	{ 0x1bc9f, 0x1bc9f }, { 0x1da87, 0x1da8b }, { 0x1e5ff, 0x1e5ff },
+	{ 0x1e95e, 0x1e95f },
+};
+
+static Bool
+lo_is_punct(uint32 cp)
+{
+	int32 lo = 0, hi = sizeof lo_punct_ranges / sizeof lo_punct_ranges[0] - 1;
+
+	while (lo <= hi)
+	{
+		int32 mid = (lo + hi) / 2;
+
+		if (cp < lo_punct_ranges[mid].lo)
+			hi = mid - 1;
+		else if (cp > lo_punct_ranges[mid].hi)
+			lo = mid + 1;
+		else
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* The code point at TEXT (UTF-8, LEN bytes left) and its length in *N */
+static uint32
+lo_utf8_at(const char *text, int32 len, int32 *n)
+{
+	const unsigned char *t = (const unsigned char *)text;
+	uint32 cp = t[0];
+	int32 k, more = cp >= 0xf0 ? 3 : cp >= 0xe0 ? 2 : cp >= 0xc0 ? 1 : 0;
+
+	if (more)
+		cp &= 0x3f >> more;
+	for (k = 1; k <= more && k < len && (t[k] & 0xc0) == 0x80; k++)
+		cp = (cp << 6) | (t[k] & 0x3f);
+	*n = k;
+	return cp;
+}
+
 /*
  * The first text of an element with a ::first-letter style (pending in
  * top_state->first_letter): its first letter, with the punctuation before
@@ -697,15 +801,20 @@ lo_first_letter_text(MWContext *context, lo_DocState *state, PA_Tag *tag)
 	}
 	state->top_state->first_letter = NULL;
 	state->top_state->first_letter_owner = NULL;
-	/* punctuation, then one letter (a UTF-8 sequence) */
-	for (j = i; j < len && ((unsigned char)text[j]) < 0x80 &&
-			 ispunct((unsigned char)text[j]); j++)
-		;
-	if (j < len)
+	/* the letter with the punctuation before and after it */
 	{
-		j++;
-		while (j < len && (((unsigned char)text[j]) & 0xc0) == 0x80)
-			j++;
+		int32 n;
+
+		for (j = i; j < len && lo_is_punct(lo_utf8_at(text + j, len - j, &n));
+			 j += n)
+			;
+		if (j < len)
+		{
+			lo_utf8_at(text + j, len - j, &n);
+			j += n;
+		}
+		while (j < len && lo_is_punct(lo_utf8_at(text + j, len - j, &n)))
+			j += n;
 	}
 	/* the copy: laying the pieces out may move the tag's text */
 	p = XP_ALLOC(len + 1);
@@ -4046,6 +4155,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 	Bool flex_nested=FALSE, flex_here=FALSE;
 	/* a CSS table (display: table): the box's table is the table */
 	Bool css_table_here=FALSE;
+	Bool is_inline_block=FALSE;
 	LO_Color box_matte;
 	Bool has_box_shadow = FALSE;
 	char *box_bgcolor=NULL;
@@ -4175,6 +4285,11 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 
 		is_block = bb != NULL;
 		XP_FREEIF(bb);
+		/* an inline-block: a box (a table) in the line */
+		bb = STYLESTRUCT_GetString(style_struct, INLINEBLOCK_STYLE);
+		is_inline_block = bb != NULL && !is_block &&
+			!is_table_relayout_begin_dummy_tag;
+		XP_FREEIF(bb);
 	}
 
 	left_margin = STYLESTRUCT_GetNumber(style_struct, LEFTMARGIN_STYLE);
@@ -4205,7 +4320,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 
 	text_width = STYLESTRUCT_GetNumber(style_struct, WIDTH_STYLE);
 	LO_AdjustSSUnits(text_width, WIDTH_STYLE, context, state);
-	if(is_block)
+	if(is_block || is_inline_block)
 	{
 		/* min-width, max-width: of the room the block has (its
 		 * paddings come off it) */
@@ -4268,7 +4383,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 		flex_value = STYLESTRUCT_GetString(style_struct, FLEX_STYLE);
 	/* (a paragraph's box is closed before the block that ends it starts:
 	 * LO_ImplicitPop) */
-	if(is_block && tag->type != P_BODY
+	if((is_block || is_inline_block) && tag->type != P_BODY
 	   && !(is_flex_item && flex_stretched))
 	{
 		box_bgcolor = STYLESTRUCT_GetString(style_struct, BG_COLOR_STYLE);
@@ -4334,6 +4449,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
            || flex_value
            || css_table_here
            || has_box_shadow
+           || is_inline_block
 		   || (borderwidth_value && borderwidth_value->value > 0)
 		   || (bordertopwidth_value && bordertopwidth_value->value > 0)
 		   || (borderbottomwidth_value && borderbottomwidth_value->value > 0)
@@ -4375,6 +4491,41 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 			|| (left_padding && left_padding->value > 0)
 			|| (right_padding && right_padding->value > 0);
 		flex_here = !flex_nested;
+	}
+
+	/* auto horizontal margins: a block narrower than its room is centred
+	 * in it (both auto) or put at its right (CSS 2.1 10.3.3) */
+	if(is_block && text_width && state->right_margin != 5000 &&
+	   !is_flex_item && !align_value)
+	{
+		char *ma = STYLESTRUCT_GetString(style_struct, MARGINAUTO_STYLE);
+
+		if(ma)
+		{
+			int32 total = (int32)text_width->value;
+			int32 room = state->right_margin - state->left_margin;
+			SS_Number *bl = borderleftwidth_value ? borderleftwidth_value
+												  : borderwidth_value;
+			SS_Number *br = borderrightwidth_value ? borderrightwidth_value
+												   : borderwidth_value;
+
+			if(left_padding && left_padding->value > 0)
+				total += (int32)left_padding->value;
+			if(right_padding && right_padding->value > 0)
+				total += (int32)right_padding->value;
+			if(bl && bl->value > 0)
+				total += (int32)bl->value;
+			if(br && br->value > 0)
+				total += (int32)br->value;
+			if(room > total)
+			{
+				if(!strcmp(ma, "both"))
+					left_margin_offset += (room - total) / 2;
+				else if(!strcmp(ma, "left"))
+					left_margin_offset += room - total;
+			}
+			XP_FREE(ma);
+		}
 	}
 
 	if(left_margin_offset || right_margin_offset || (text_width && !use_table_for_box))
@@ -4601,6 +4752,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
          * item's (its cell is its width), fits its content) */
         /* (a CSS table is as wide as its width, or its content) */
         if(text_width || (state->right_margin != 5000 && !css_table_here
+                          && !is_inline_block
                           && (right_margin || left_margin
                               || (!align_value && !is_flex_item))))
 		{
@@ -4727,7 +4879,9 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 
 		lo_BeginTableAttributes(context,
                         state,
-                        align_attr,
+                        /* (an inline-block's table is laid out as a
+                         * float's, then put in the line: lo_EndTable) */
+                        is_inline_block ? "left" : align_attr,
                         border_attr,
                         border_top_attr,
                         border_bottom_attr,
@@ -4814,6 +4968,8 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 				XP_FREE(shadow);
 			}
 		}
+		if(is_inline_block && state->current_table)
+			state->current_table->css_inline = TRUE;
 		if(css_table_here && state->current_table)
 		{
 			char *tl = STYLESTRUCT_GetString(style_struct, TABLELAYOUT_STYLE);
@@ -4906,6 +5062,51 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 											TRUE);  /* the table's mode: for a
 											 * box, no cell border and no
 											 * space around the cell */
+				/* background-position: the cell's backdrop's */
+				if(cell_bgimage_attr && state->current_table->current_subdoc)
+				{
+					char *bp = STYLESTRUCT_GetString(style_struct, BGPOS_STYLE);
+
+					if(bp)
+					{
+						lo_Backdrop *bd =
+							&state->current_table->current_subdoc->backdrop;
+						char *p = bp, *e;
+						int32 k;
+
+						for(k = 0; k < 2 && *p; k++)
+						{
+							double v;
+							SS_Number *num;
+							char word[40];
+							int32 n = 0;
+
+							while(*p == ' ')
+								p++;
+							while(*p && *p != ' ' && n < 39)
+								word[n++] = *p++;
+							word[n] = '\0';
+							v = strtod(word, &e);
+							if(*e == '%')
+							{
+								if(k == 0) { bd->pos_x = (int16)v; bd->pos_x_pct = TRUE; }
+								else { bd->pos_y = (int16)v; bd->pos_y_pct = TRUE; }
+								continue;
+							}
+							num = STYLESTRUCT_StringToSSNumber(style_struct, word);
+							if(num)
+							{
+								LO_AdjustSSUnits(num, WIDTH_STYLE, context, state);
+								if(k == 0)
+									bd->pos_x = (int16)num->value;
+								else
+									bd->pos_y = (int16)num->value;
+								STYLESTRUCT_FreeSSNumber(style_struct, num);
+							}
+						}
+						XP_FREE(bp);
+					}
+				}
 			}
 		}
 
