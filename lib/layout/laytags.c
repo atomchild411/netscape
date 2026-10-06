@@ -2695,7 +2695,7 @@ lo_setup_list(lo_DocState *state,
 		list->bullet_start = val;
 		list->quote_type = quote_type;
 		list->compact = compact;
-		list->tag = PA_CloneMDLTag(tag);
+		list->tag = tag ? PA_CloneMDLTag(tag) : NULL;	/* (none from a style's list-item) */
 
 		list->lo_any.x = state->x;
 		list->lo_any.y = state->y;
@@ -2726,7 +2726,7 @@ lo_TeardownList(MWContext *context, lo_DocState *state, PA_Tag *tag)
 		list->lo_any.type = LO_LIST;
   		list->lo_any.ele_id = NEXT_ELEMENT;
 		list->is_end = TRUE;
-		list->tag = PA_CloneMDLTag(tag);
+		list->tag = tag ? PA_CloneMDLTag(tag) : NULL;	/* (none from a style's list-item) */
 
 		list->lo_any.x = state->x;
 		list->lo_any.y = state->y;
