@@ -999,7 +999,16 @@ NET_ParseContentTypeHeader(MWContext *context, char *value, URL_Struct *URL_s, P
 	char *first_arg, *next_arg;
 
 	if(URL_s->preset_content_type)
+	{
+		/* a style sheet's load (LINK) sent as plain text or HTML: keep
+		 * the server's type, so that the sheet is dropped (CSS 2.1 4.4;
+		 * other types still load: servers often mislabel CSS) */
+		if(URL_s->content_type && !PL_strcasecmp(URL_s->content_type, TEXT_CSS)
+		   && value && (!PL_strncasecmp(XP_StripLine(value), "text/plain", 10) ||
+						!PL_strncasecmp(XP_StripLine(value), "text/html", 9)))
+			StrAllocCopy(URL_s->content_type, "text/plain");
 		return;
+	}
 
 	first_arg = strtok(value, ";");
 

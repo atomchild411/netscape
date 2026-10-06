@@ -1225,56 +1225,23 @@ lo_FlushLineList(MWContext *context, lo_DocState *state, uint32 break_type, uint
 		}
 	}
 	*/
-#if 0
-	/* apply line-height stack mods (if exists) */
-	if(state->line_height_stack && state->end_last_line) 
+#ifdef NS_LIBCSS
+	/* CSS line-height: the line box is the line height in effect (the
+	 * innermost element's that set one), its content moved by the
+	 * half-leading, which is negative when the line height is less than
+	 * the content's (CSS 2.1 10.8.1) */
+	if(state->line_height_stack && state->line_list && state->line_height > 0)
 	{
-		LO_LinefeedStruct *linefeed = (LO_LinefeedStruct*)state->end_last_line;
-		int32 cur_line_height;
-		int32 new_line_height;
-		int32 line_height_diff;
+		int32 css_lh = state->line_height_stack->height;
+		int32 diff = css_lh - state->line_height;
+		int32 half = diff >= 0 ? diff / 2 : -((1 - diff) / 2);
 
-		if(state->line_height == 0)
+		if(css_lh >= 0)
 		{
-        	int32 new_height = state->text_info.ascent +
-            						state->text_info.descent;
-			int32 new_baseline = state->text_info.ascent;
-
-        	if ((new_height <= 0)&&(state->font_stack != NULL)&&
-            	(state->font_stack->text_attr != NULL))
-			{
-				lo_fillin_text_info(context, state);
-
-            	new_height = state->text_info.ascent + state->text_info.descent;
-				new_baseline = state->text_info.ascent;
-
-			}
-
-			if(new_height <= 0)
-			{
-				new_height = state->default_line_height;
-				new_baseline = state->default_line_height;
-			}
-
-			state->line_height = new_height;
-			state->baseline = new_baseline;
-		}
-
-		cur_line_height = (state->y + state->baseline) - 
-								(linefeed->y + linefeed->baseline);
-
-		new_line_height = state->line_height_stack->height;
-		line_height_diff = new_line_height - cur_line_height;
-
-		/* only allow increasing line heights 
-		 * explicitly disallow negative diffs	
-		 */
-		if(line_height_diff > 0)
-		{
-			lo_add_to_y_for_all_elements_in_line(state, line_height_diff);
-
-			state->baseline += line_height_diff;
-			state->line_height += line_height_diff;
+			if(half != 0)
+				lo_add_to_y_for_all_elements_in_line(state, half);
+			state->baseline += half;
+			state->line_height = css_lh;
 		}
 	}
 #endif

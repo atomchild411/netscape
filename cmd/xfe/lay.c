@@ -21,6 +21,7 @@
  */
 
 
+#include <math.h>
 #include "mozilla.h"
 #include "xfe.h"
 #include "selection.h"
@@ -632,6 +633,25 @@ fe_display_text (MWContext *context, int iLocation, LO_TextStruct *text,
     }
   
   
+  /* CSS text-shadow: the text once more, in its colour, under the text */
+  if (!blunk && !selected_p && text->text_attr->no_background &&
+      text->text_attr->has_shadow)
+    {
+      LO_TextAttr shadow_attr = *text->text_attr;
+      fe_Font shadow_font;
+      Boolean shadow_sel;
+      GC shadow_gc;
+
+      shadow_attr.fg = text->text_attr->shadow;
+      shadow_gc = fe_get_text_gc (context, &shadow_attr, &shadow_font,
+                                  &shadow_sel, False);
+      if (shadow_gc)
+        FE_DRAW_STRING (text->text_attr->charset, dpy, drawable, shadow_font,
+                        shadow_gc, x + text->text_attr->shadow_x,
+                        y + text->text_attr->shadow_y,
+                        ((char *) text->text) + start, end - start);
+    }
+
   if (blunk)
     ;	/* No text to draw. */
   else if (!selected_p && text->text_attr->no_background)
@@ -1388,6 +1408,131 @@ fe_DisplayTableBorder(MWContext *context, LO_TableStruct *ts,
 
 #define ED_SELECTION_BORDER 3
 
+/* CSS box decorations, drawn with the box's table (layout puts them on
+ * a box's table element): the part of a box-shadow outside the box, its
+ * blur as bands fading into the colour behind the box (ts->matte); rounded
+ * corners, by painting that colour outside each corner's ellipse and
+ * drawing the border's arc. */
+
+static unsigned long
+fe_mix_pixel(MWContext *context, LO_Color *a, LO_Color *b, double t)
+{
+  return fe_GetPixel(context,
+                     (int)(a->red + (b->red - a->red) * t + 0.5),
+                     (int)(a->green + (b->green - a->green) * t + 0.5),
+                     (int)(a->blue + (b->blue - a->blue) * t + 0.5));
+}
+
+static void
+fe_DisplayBoxShadow(MWContext *context, LO_TableStruct *ts, XRectangle *box)
+{
+  fe_Drawable *fe_drawable = CONTEXT_DATA(context)->drawable;
+  Drawable drawable = fe_drawable->xdrawable;
+  Display *dpy = fe_display;
+  Region outside, band;
+  XRectangle r;
+  XGCValues gcv;
+  GC gc;
+  int i, blur = ts->shadow_blur > 0 ? ts->shadow_blur : 0;
+  int steps = blur > 8 ? 8 : (blur > 0 ? blur : 1);
+  double alpha = ts->shadow_alpha / 255.0;
+
+  gc = XCreateGC(dpy, drawable, 0, &gcv);
+  if (!gc)
+    return;
+  /* from the outermost band in: each a little stronger */
+  for (i = steps; i >= 1; i--)
+    {
+      int grow = blur > 0 ? (blur * i) / steps - blur / 2 : 0;
+      double t = blur > 0 ? alpha * (steps - i + 1) / (steps + 1) : alpha;
+
+      r.x = box->x + ts->shadow_x - grow;
+      r.y = box->y + ts->shadow_y - grow;
+      r.width = box->width + 2 * grow;
+      r.height = box->height + 2 * grow;
+      band = XCreateRegion();
+      XUnionRectWithRegion(&r, band, band);
+      outside = XCreateRegion();
+      XUnionRectWithRegion(box, outside, outside);
+      XSubtractRegion(band, outside, band);
+      if (fe_drawable->clip_region)
+        XIntersectRegion(band, (Region)fe_drawable->clip_region, band);
+      XSetRegion(dpy, gc, band);
+      XSetForeground(dpy, gc, fe_mix_pixel(context, &ts->matte,
+                                           &ts->shadow_color, t));
+      XFillRectangle(dpy, drawable, gc, r.x, r.y, r.width, r.height);
+      XDestroyRegion(band);
+      XDestroyRegion(outside);
+    }
+  XFreeGC(dpy, gc);
+}
+
+static void
+fe_DisplayRoundedCorners(MWContext *context, LO_TableStruct *ts,
+                         XRectangle *box)
+{
+  fe_Drawable *fe_drawable = CONTEXT_DATA(context)->drawable;
+  Drawable drawable = fe_drawable->xdrawable;
+  XGCValues gcv;
+  GC gc;
+  int k, j, bw;
+
+  memset(&gcv, ~0, sizeof gcv);
+  gcv.foreground = fe_GetPixel(context, ts->matte.red, ts->matte.green,
+                               ts->matte.blue);
+  gc = fe_GetGCfromDW(fe_display, drawable, GCForeground, &gcv,
+                      fe_drawable->clip_region);
+  for (k = 0; k < 4; k++)
+    {
+      int rx = ts->radius_x[k], ry = ts->radius_y[k] ? ts->radius_y[k] : rx;
+
+      if (rx <= 0 || ry <= 0)
+        continue;
+      if (rx > box->width / 2) rx = box->width / 2;
+      if (ry > box->height / 2) ry = box->height / 2;
+      for (j = 0; j < ry; j++)
+        {
+          double dy = ry - (j + 0.5);
+          int out = rx - (int)(rx * sqrt(1 - (dy * dy) / ((double)ry * ry)) + 0.5);
+          int row, col;
+
+          if (out <= 0)
+            continue;
+          row = (k < 2) ? box->y + j : box->y + box->height - 1 - j;
+          col = (k == 0 || k == 3) ? box->x : box->x + box->width - out;
+          XFillRectangle(fe_display, drawable, gc, col, row, out, 1);
+        }
+    }
+  /* the border's arcs (one width, the top's) */
+  bw = ts->border_top_width > 0 ? ts->border_top_width : 0;
+  if (bw > 0)
+    {
+      gcv.foreground = fe_GetPixel(context, ts->border_color.red,
+                                   ts->border_color.green,
+                                   ts->border_color.blue);
+      gcv.line_width = bw;
+      gc = fe_GetGCfromDW(fe_display, drawable, GCForeground | GCLineWidth,
+                          &gcv, fe_drawable->clip_region);
+      for (k = 0; k < 4; k++)
+        {
+          int rx = ts->radius_x[k], ry = ts->radius_y[k] ? ts->radius_y[k] : rx;
+          int ax, ay;
+
+          if (rx <= 0 || ry <= 0)
+            continue;
+          if (rx > box->width / 2) rx = box->width / 2;
+          if (ry > box->height / 2) ry = box->height / 2;
+          ax = (k == 0 || k == 3) ? box->x : box->x + box->width - 2 * rx;
+          ay = (k < 2) ? box->y : box->y + box->height - 2 * ry;
+          /* (the line is centred on the arc: inset it by half its width) */
+          XDrawArc(fe_display, drawable, gc, ax + bw / 2, ay + bw / 2,
+                   2 * rx - bw, 2 * ry - bw,
+                   (k == 0 ? 90 : k == 1 ? 0 : k == 2 ? 270 : 180) * 64,
+                   90 * 64);
+        }
+    }
+}
+
 void
 XFE_DisplayTable (MWContext *context, int loc, LO_TableStruct *ts)
 {
@@ -1491,6 +1636,8 @@ XFE_DisplayTable (MWContext *context, int loc, LO_TableStruct *ts)
   } /* end showing selection highlight if editor */
 #endif /* EDITOR */
 
+  if (ts->has_shadow)
+      fe_DisplayBoxShadow(context, ts, &table_rect);
   if (hasBorder)
   {
       widths.top = ts->border_top_width;
@@ -1499,6 +1646,8 @@ XFE_DisplayTable (MWContext *context, int loc, LO_TableStruct *ts)
       widths.left = ts->border_left_width;
       fe_DisplayTableBorder(context, ts, &table_rect, &widths);
   }
+  if (ts->radius_x[0] || ts->radius_x[1] || ts->radius_x[2] || ts->radius_x[3])
+      fe_DisplayRoundedCorners(context, ts, &table_rect);
 }
 
 typedef struct _SashInfo {

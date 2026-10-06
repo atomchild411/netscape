@@ -31,6 +31,33 @@
 extern int MK_OUT_OF_MEMORY;
 extern int MK_MALFORMED_URL_ERROR;
 
+/* Decode base64 TEXT (LEN bytes; white space and anything else that is
+ * not base64 skipped) in place; returns the decoded length. */
+PRIVATE int32
+net_data_url_unbase64(char *text, int32 len)
+{
+	int32 i, out = 0, bits = 0, nbits = 0;
+
+	for (i = 0; i < len; i++) {
+		int c = (unsigned char) text[i], v;
+
+		if (c >= 'A' && c <= 'Z') v = c - 'A';
+		else if (c >= 'a' && c <= 'z') v = c - 'a' + 26;
+		else if (c >= '0' && c <= '9') v = c - '0' + 52;
+		else if (c == '+' || c == '-') v = 62;
+		else if (c == '/' || c == '_') v = 63;
+		else if (c == '=') break;
+		else continue;
+		bits = (bits << 6) | v;
+		nbits += 6;
+		if (nbits >= 8) {
+			nbits -= 8;
+			text[out++] = (char) ((bits >> nbits) & 0xff);
+		}
+	}
+	return out;
+}
+
 /* format of the DATA: URL
  *
  * data:[CONTENT-TYPE][;base64],DATA
@@ -96,16 +123,9 @@ net_DataURLLoad (ActiveEntry * ce)
 		PL_strfree(preset);
 	}
 
-	if(is_base64)
-	{
-		stream = NET_MimeEncodingConverter(ce->format_out, ENCODING_BASE64, ce->URL_s, ce->window_id);
-	}
-	else
-	{
-		/* open the outgoing stream
-		 */
-		stream = NET_StreamBuilder(ce->format_out, ce->URL_s, ce->window_id);
-	}
+	/* open the outgoing stream (base64 is decoded here: the base64
+	 * converter is not there for every format, images' for one) */
+	stream = NET_StreamBuilder(ce->format_out, ce->URL_s, ce->window_id);
 
 	if(!stream)
 	  {
@@ -120,9 +140,13 @@ net_DataURLLoad (ActiveEntry * ce)
 	PL_strcpy(data_buffer, comma+1);
 
     /* the data is %-escaped (base64 data too, before decoding) */
-    ce->status = (*stream->put_block)(stream,
-                                        data_buffer,
-                                        NET_UnEscapeCnt(data_buffer));
+    {
+        int32 len = NET_UnEscapeCnt(data_buffer);
+
+        if(is_base64)
+            len = net_data_url_unbase64(data_buffer, len);
+        ce->status = (*stream->put_block)(stream, data_buffer, len);
+    }
     if(ce->status < 0)
       {
     	(*stream->abort)(stream, ce->status);

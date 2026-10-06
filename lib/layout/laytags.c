@@ -3235,6 +3235,28 @@ lo_SetStyleSheetFontProperties(MWContext *context,
 		push_font = TRUE;
 	}
 
+#ifdef NS_LIBCSS
+	/* text-shadow */
+	property = STYLESTRUCT_GetString(style_struct, TEXTSHADOW_STYLE);
+	if(property)
+	{
+		int dx = 0, dy = 0;
+		char hex[16];
+
+		hex[0] = '\0';
+		if(sscanf(property, "%d %d %15s", &dx, &dy, hex) == 3 && hex[0] == '#')
+		{
+			tmp_attr.has_shadow = TRUE;
+			tmp_attr.shadow_x = dx;
+			tmp_attr.shadow_y = dy;
+			LO_ParseStyleSheetRGB(hex, &tmp_attr.shadow.red,
+								  &tmp_attr.shadow.green, &tmp_attr.shadow.blue);
+			push_font = TRUE;
+		}
+		XP_FREE(property);
+	}
+#endif
+
     /* don't inherit text background colors from the body and table tags */
     if(use_background_color
        && tag->type != P_UNKNOWN  /* table relayout dummy tag */
@@ -3635,6 +3657,8 @@ lo_cell_inherit_font(lo_DocState *prev, lo_DocState *state)
 	attr = lo_FetchTextAttr(state, &tmp_attr);
 	attr->no_background = TRUE;	/* not the text background */
 	lo_PushFont(state, P_UNKNOWN, attr);
+	if (prev->line_height_stack)
+		lo_PushLineHeight(state, prev->line_height_stack->height);
 }
 
 /*
@@ -4022,6 +4046,8 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 	Bool flex_nested=FALSE, flex_here=FALSE;
 	/* a CSS table (display: table): the box's table is the table */
 	Bool css_table_here=FALSE;
+	LO_Color box_matte;
+	Bool has_box_shadow = FALSE;
 	char *box_bgcolor=NULL;
 	SS_Number *box_height=NULL;
 	int32 left_margin_offset=0, right_margin_offset=0;
@@ -4287,6 +4313,15 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 		}
 	}
 
+	/* a box-shadow needs the box */
+	if(is_block && tag->type != P_BODY)
+	{
+		char *bs = STYLESTRUCT_GetString(style_struct, BOXSHADOW_STYLE);
+
+		has_box_shadow = bs != NULL;
+		XP_FREEIF(bs);
+	}
+
 	/* do backgrounds and floats using tables */
 	if(!(tag->type == P_TABLE
          || tag->type == P_TABLE_DATA
@@ -4298,6 +4333,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
            || box_height
            || flex_value
            || css_table_here
+           || has_box_shadow
 		   || (borderwidth_value && borderwidth_value->value > 0)
 		   || (bordertopwidth_value && bordertopwidth_value->value > 0)
 		   || (borderbottomwidth_value && borderbottomwidth_value->value > 0)
@@ -4419,6 +4455,13 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 
 			line_height_diff = ((int32)ss_num->value) - cur_line_height;
 
+#ifdef NS_LIBCSS
+			/* every line of the element is that high (layout.c's
+			 * lo_FlushLineList), smaller ones too */
+			lo_PushLineHeight(state, (int32)ss_num->value);
+			STYLESTRUCT_SetString(style_struct, STYLE_NEED_TO_POP_LINE_HEIGHT, "1", 0);
+			line_height_diff = 0;
+#else
 #ifndef ALLOW_NEG_MARGINS
 			/* only allow increasing line heights 
 			 * explicitly disallow negative diffs
@@ -4438,6 +4481,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 				lo_PushLineHeight(state, (int32)ss_num->value);
 				STYLESTRUCT_SetString(style_struct, STYLE_NEED_TO_POP_LINE_HEIGHT, "1", 0);
 			}
+#endif
 
 			STYLESTRUCT_FreeSSNumber(style_struct, ss_num);
 
@@ -4674,6 +4718,10 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 					  cellspace_attr ? cellspace_attr : "-",
 					  toppad_attr ? toppad_attr : "-", rightpad_attr ? rightpad_attr : "-",
 					  bottompad_attr ? bottompad_attr : "-", leftpad_attr ? leftpad_attr : "-"), fputc(10, lo_TableTrace());
+		/* the colour behind the box: its rounded corners' */
+		box_matte.red = STATE_DEFAULT_BG_RED(state);
+		box_matte.green = STATE_DEFAULT_BG_GREEN(state);
+		box_matte.blue = STATE_DEFAULT_BG_BLUE(state);
 		/* mark that we are in a table */
 		STYLESTRUCT_SetString(style_struct, STYLE_NEED_TO_POP_TABLE, "1", 0);
 
@@ -4704,6 +4752,76 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 		XP_FREEIF(width_attr);
 		XP_FREEIF(height_attr);
 		XP_FREEIF(css_spacing_attr);
+		/* border-radius, box-shadow: the box's table draws them (the
+		 * front end: XFE_DisplayTable) */
+		if(state->current_table && state->current_table->table_ele)
+		{
+			LO_TableStruct *te = state->current_table->table_ele;
+			char *rad = STYLESTRUCT_GetString(style_struct, RADIUS_STYLE);
+			char *shadow = STYLESTRUCT_GetString(style_struct, BOXSHADOW_STYLE);
+
+			if(rad)
+			{
+				char *p = rad, *e;
+				int32 k, bw = state->current_table->width;
+				int32 bh = state->current_table->height;
+
+				for(k = 0; k < 8 && *p; k++)
+				{
+					double v;
+
+					while(*p == ' ')
+						p++;
+					if(*p == 'p')
+					{
+						v = strtod(p + 1, &e) / 100 *
+							((k & 1) ? (bh > 0 ? bh : bw) : bw);
+					}
+					else
+						v = strtod(p, &e);
+					if(e == p)
+						break;
+					p = e;
+					if(k & 1)
+						te->radius_y[k / 2] = (int16)(v > 0 ? v : 0);
+					else
+						te->radius_x[k / 2] = (int16)(v > 0 ? v : 0);
+				}
+				te->matte = box_matte;
+				XP_FREE(rad);
+			}
+			if(shadow)
+			{
+				int dx = 0, dy = 0, blur = 0;
+				char hex[16];
+				unsigned long c = 0;
+
+				hex[0] = '\0';
+				if(sscanf(shadow, "%d %d %d %15s", &dx, &dy, &blur, hex) >= 3
+				   && hex[0] == '#')
+				{
+					c = strtoul(hex + 1, NULL, 16);
+					te->has_shadow = TRUE;
+					te->shadow_x = dx;
+					te->shadow_y = dy;
+					te->shadow_blur = blur;
+					te->shadow_color.red = (c >> 24) & 255;
+					te->shadow_color.green = (c >> 16) & 255;
+					te->shadow_color.blue = (c >> 8) & 255;
+					te->shadow_alpha = c & 255;
+					te->matte = box_matte;
+				}
+				XP_FREE(shadow);
+			}
+		}
+		if(css_table_here && state->current_table)
+		{
+			char *tl = STYLESTRUCT_GetString(style_struct, TABLELAYOUT_STYLE);
+
+			if(tl && !strcmp(tl, "fixed"))
+				state->current_table->css_fixed_layout = TRUE;
+			XP_FREEIF(tl);
+		}
 
 		if(state->sub_state)
 			state = state->sub_state;
@@ -4809,6 +4927,11 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
          * and we don't want that special treatment
          */
 		lo_PushFont(state, P_UNKNOWN, attr);  
+#ifdef NS_LIBCSS
+		/* and the line height */
+		if(prev_state->line_height_stack)
+			lo_PushLineHeight(state, prev_state->line_height_stack->height);
+#endif
 
         if(tag->type == P_PARAGRAPH)
             state->in_paragraph = TRUE;
@@ -5124,6 +5247,70 @@ lo_SetStyleSheetProperties(MWContext *context,
 	lo_SetStyleSheetRandomProperties(context, state, style_struct, tag);
 
 #ifdef NS_LIBCSS
+	/* vertical-align on an inline element: sub, super or a length raise
+	 * or lower its text from the line's baseline (as the SUB and SUP tags
+	 * do); undone at its end */
+	{
+		char *va = STYLESTRUCT_GetString(style_struct, VERTICAL_ALIGN_STYLE);
+		char *bb = STYLESTRUCT_GetString(style_struct, BLOCKBOX_STYLE);
+
+		if(va && !bb && state->font_stack)
+		{
+			int32 shift = 0, ascent = 0;
+			LO_TextStruct tmp_text;
+			LO_TextInfo text_info;
+			PA_Block buff;
+			char *str;
+
+			if(!strcmp(va, "sub") || !strcmp(va, "super") || strchr(va, '%'))
+			{
+				memset(&tmp_text, 0, sizeof tmp_text);
+				buff = PA_ALLOC(2);
+				if(buff)
+				{
+					PA_LOCK(str, char *, buff);
+					str[0] = 'x';
+					str[1] = '\0';
+					PA_UNLOCK(buff);
+					tmp_text.text = buff;
+					tmp_text.text_len = 1;
+					tmp_text.text_attr = state->font_stack->text_attr;
+					FE_GetTextInfo(context, &tmp_text, &text_info);
+					PA_FREE(buff);
+					ascent = text_info.ascent;
+				}
+			}
+			if(!strcmp(va, "sub"))
+				shift = ascent / 2;
+			else if(!strcmp(va, "super"))
+				shift = -(ascent / 2);
+			else if(strchr(va, '%'))
+				shift = -(int32)(atof(va) * (ascent * 5 / 4) / 100);
+			else if(isdigit((unsigned char)va[0]) || va[0] == '-' ||
+					va[0] == '.')
+			{
+				SS_Number *num = STYLESTRUCT_StringToSSNumber(style_struct, va);
+
+				if(num)
+				{
+					LO_AdjustSSUnits(num, WIDTH_STYLE, context, state);
+					shift = -(int32)num->value;
+					STYLESTRUCT_FreeSSNumber(style_struct, num);
+				}
+			}
+			if(shift)
+			{
+				char sbuf[24];
+
+				state->baseline += shift;
+				PR_snprintf(sbuf, sizeof sbuf, "%ld", (long)shift);
+				STYLESTRUCT_SetString(style_struct, STYLE_NEED_TO_POP_BASELINE,
+									  sbuf, 0);
+			}
+		}
+		XP_FREEIF(va);
+		XP_FREEIF(bb);
+	}
 	/* ::first-letter: the next text's first letter (the ::before text's
 	 * included) */
 	{

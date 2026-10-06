@@ -655,8 +655,16 @@ _IMGCB_DisplayPixmap(IMGCB* img_cb, jint op, void* dpy_cx, IL_Pixmap* image,
      fe_ContextData  *fec = (pContext)->fe.data;
                             /* (fe_ContextData *) pContext->fe.data; */
 
-     /* Call the context specific displayPixmap function */
-     fec->DisplayPixmap( pContext, image, mask, x, y, x_offset, y_offset, req_w, req_h);
+     /* Call the context specific displayPixmap function.  The area to
+        draw is req_w x req_h (the image's size on the page), unless the
+        area asked for goes past the image: a tiled backdrop's, which
+        displayImage tiles (it was given the image's size, so drew it once) */
+     if (x_offset + width > req_w || y_offset + height > req_h)
+         fec->DisplayPixmap( pContext, image, mask, x, y, x_offset, y_offset,
+                             width, height);
+     else
+         fec->DisplayPixmap( pContext, image, mask, x, y, x_offset, y_offset,
+                             req_w, req_h);
 
 }
 

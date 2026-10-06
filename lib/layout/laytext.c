@@ -249,6 +249,8 @@ lo_SetDefaultFontAttr(lo_DocState *state, LO_TextAttr *tptr,
 	tptr->FE_Data = NULL;
 	tptr->point_size = 0;
 	tptr->font_weight = 0;
+	tptr->has_shadow = FALSE;
+	tptr->shadow_x = tptr->shadow_y = 0;
 }
 
 

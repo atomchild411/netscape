@@ -877,6 +877,16 @@ LO_PopStyleTagByIndex(MWContext *context, lo_DocState **state,
 #ifdef NS_LIBCSS
 	/* ::after, in the element's box (before it closes) */
 	lo_GeneratedContent(context, *state, top_style, TRUE);
+	/* the end of a raised or lowered inline element (vertical-align) */
+	if((property = STYLESTRUCT_GetString(top_style,
+										 STYLE_NEED_TO_POP_BASELINE)) != NULL)
+	{
+		STYLESTRUCT_SetString(top_style, STYLE_NEED_TO_POP_BASELINE, "0",
+							  MAX_STYLESTRUCT_PRIORITY);
+		(*state)->baseline -= atol(property);
+		XP_FREE(property);
+	}
+
 	/* a ::first-letter that found no text ends with its element */
 	if((*state)->top_state->first_letter_owner == (void *)top_style)
 	{

@@ -4685,6 +4685,9 @@ lo_BeginTableAttributes(MWContext *context,
 	table_ele->border_top_width = TABLE_DEF_BORDER;
 	table_ele->border_bottom_width = TABLE_DEF_BORDER;
 	table_ele->border_left_width = TABLE_DEF_BORDER;
+	XP_MEMSET(table_ele->radius_x, 0, sizeof table_ele->radius_x);
+	XP_MEMSET(table_ele->radius_y, 0, sizeof table_ele->radius_y);
+	table_ele->has_shadow = FALSE;
 	table_ele->border_right_width = TABLE_DEF_BORDER;
 	table_ele->border_style = TABLE_DEF_BORDER_STYLE;
 
@@ -5047,6 +5050,7 @@ lo_BeginTableAttributes(MWContext *context,
 	table->flex_next_shrink = 1;
 	table->flex_next_basis = -1;
 	table->grid = NULL;
+	table->css_fixed_layout = FALSE;
 	table->grid_next_lines[0] = table->grid_next_lines[1] = 0;
 	table->grid_next_lines[2] = table->grid_next_lines[3] = 0;
 	table->grid_next_justify = -1;
@@ -5409,6 +5413,25 @@ lo_BeginTable(MWContext *context, lo_DocState *state, PA_Tag *tag)
 	char *rightpad_attr =   (char*)lo_FetchParamValue(context, tag, PARAM_RIGHTPAD);
 	char *cellspace_attr = 	(char*)lo_FetchParamValue(context, tag, PARAM_CELLSPACE);
 	char *cols_attr = 		(char*)lo_FetchParamValue(context, tag, PARAM_COLS);
+#ifdef NS_LIBCSS
+	char *css_spacing = NULL;
+
+	/* CSS border-spacing (nscss: when there is no cellspacing) */
+	if(!cellspace_attr && state->top_state && state->top_state->style_stack)
+	{
+		StyleStruct *ss = STYLESTACK_GetStyleByIndex(
+			state->top_state->style_stack, 0);
+		SS_Number *sp = ss ? STYLESTRUCT_GetNumber(ss, TABLESPACING_STYLE)
+						   : NULL;
+
+		if(sp)
+		{
+			LO_AdjustSSUnits(sp, WIDTH_STYLE, context, state);
+			css_spacing = PR_smprintf("%ld", (long)(sp->value > 0 ? sp->value : 0));
+			STYLESTRUCT_FreeSSNumber(ss, sp);
+		}
+	}
+#endif
 
 	if(!border_style_attr)
 	{
@@ -5486,8 +5509,25 @@ lo_BeginTable(MWContext *context, lo_DocState *state, PA_Tag *tag)
 							bottompad_attr,
 							leftpad_attr,
 							rightpad_attr,
+#ifdef NS_LIBCSS
+							css_spacing ? css_spacing :
+#endif
 							cellspace_attr,
 							cols_attr);
+#ifdef NS_LIBCSS
+	XP_FREEIF(css_spacing);
+	/* table-layout: fixed */
+	if(state->current_table && state->top_state && state->top_state->style_stack)
+	{
+		StyleStruct *ss = STYLESTACK_GetStyleByIndex(
+			state->top_state->style_stack, 0);
+		char *tl = ss ? STYLESTRUCT_GetString(ss, TABLELAYOUT_STYLE) : NULL;
+
+		if(tl && !strcmp(tl, "fixed"))
+			state->current_table->css_fixed_layout = TRUE;
+		XP_FREEIF(tl);
+	}
+#endif
 
 	if(align_attr)
 		PA_FREE(align_attr);
@@ -7233,6 +7273,55 @@ fprintf(stderr, "lo_EndTable called\n");
 	{
 		table_width += (2 * table_pad);
 		min_table_width += (2 * table_pad);
+	}
+
+	/* table-layout: fixed with a width: the first row's cells' widths,
+	 * the other columns sharing what is left; content does not widen
+	 * them (CSS 2.1 17.5.2.1) */
+	if (table->css_fixed_layout && table->width > 0 &&
+		table->flex == LO_FLEX_NONE && table->cols > 0)
+	{
+		lo_table_span *sp;
+		int32 avail, given = 0, free_cols = 0, x, k, w;
+		int32 *colw = (int32 *)XP_ALLOC(table->cols * sizeof(int32));
+
+		if (colw)
+		{
+			avail = table->width - (table->cols + 1) * cell_pad
+				- table->table_ele->border_left_width
+				- table->table_ele->border_right_width;
+			for (x = 0; x < table->cols; x++)
+				colw[x] = -1;
+			for (x = 0; x < table->cols; x++)
+			{
+				lo_TableCell *c = cell_array[x].cell;
+
+				if (c == NULL || c == &blank_cell || colw[x] >= 0)
+					continue;
+				w = c->percent_width > 0 ? c->percent_width * avail / 100
+					: c->specified_width;
+				if (w <= 0)
+					continue;
+				/* (spread over the columns it spans) */
+				for (k = 0; k < c->colspan && x + k < table->cols; k++)
+					colw[x + k] = w / c->colspan;
+			}
+			for (x = 0; x < table->cols; x++)
+				if (colw[x] >= 0)
+					given += colw[x];
+				else
+					free_cols++;
+			for (x = 0; x < table->cols; x++)
+				if (colw[x] < 0)
+					colw[x] = avail > given ? (avail - given) / free_cols : 0;
+			for (sp = table->width_spans, x = 0; sp && x < table->cols;
+				 sp = sp->next, x++)
+				sp->dim = sp->min_dim = colw[x];
+			XP_FREE(colw);
+			width_limit = table->width;
+			relayout_pass = TRUE;
+			goto flex_widths_done;
+		}
 	}
 
 	/* a flex table sizes its items itself */

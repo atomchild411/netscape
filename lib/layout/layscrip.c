@@ -1604,7 +1604,10 @@ LO_CSSConverter(FO_Present_Types format_out, void *data_object,
         return NULL;
     s->context = context;
     s->data = (ScriptData *) url_struct->fe_data;
-    s->failed = url_struct->server_status >= 400;
+    s->failed = url_struct->server_status >= 400 ||
+        /* not a style sheet (net: sent as text/plain or text/html) */
+        (url_struct->content_type &&
+         !XP_STRCASECMP(url_struct->content_type, "text/plain"));
     return NET_NewStream("CSS", (MKStreamWriteFunc) lo_css_write,
                          (MKStreamCompleteFunc) lo_css_complete,
                          (MKStreamAbortFunc) lo_css_abort,

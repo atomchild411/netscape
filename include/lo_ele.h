@@ -280,6 +280,10 @@ struct LO_TextAttr_struct {
     void *FE_Data;     /* For the front end to store font IDs */
     struct LO_TextAttr_struct *next; /* to chain in hash table */
     int16 charset;
+    /* CSS text-shadow (the first): its offset and colour */
+    PRPackedBool has_shadow;
+    int16 shadow_x, shadow_y;
+    LO_Color shadow;
 };
  
 /*
@@ -906,6 +910,16 @@ struct LO_TableStruct_struct {
     int16 sel_end;
     int32 inter_cell_space;  /*cmanske: CELLSPACING value - used when drawing table selection feedback */
     void *table;		/* Actually a lo_TableRec *.  Added for relayout */
+    /* CSS, on a box's table: rounded corners (radii from the top left,
+     * clockwise, horizontal and vertical), drawn by painting outside them
+     * the colour behind the box (matte); a box-shadow (its offset, blur
+     * and colour, alpha as 0-255) */
+    int16 radius_x[4], radius_y[4];
+    LO_Color matte;
+    PRPackedBool has_shadow;
+    int16 shadow_x, shadow_y, shadow_blur;
+    LO_Color shadow_color;
+    uint8 shadow_alpha;
 };
 
 struct LO_CellStruct_struct {

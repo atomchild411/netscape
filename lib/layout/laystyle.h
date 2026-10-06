@@ -132,6 +132,11 @@ extern XP_Bool LO_IsStyledUnknownTag(lo_DocState *state, PA_Tag *tag, XP_Bool *i
 /* nscss: CSS tables (display: table, table-row, table-cell) */
 #define TABLEPART_STYLE			"nsTable"
 #define TABLESPACING_STYLE		"nsTableSpacing"
+#define TABLELAYOUT_STYLE		"nsTableLayout"	/* "fixed" */
+#define STYLE_NEED_TO_POP_BASELINE	"nsNeedToPopBaseline"	/* the shift to undo */
+#define RADIUS_STYLE			"nsRadius"		/* nscss: 8 radii, px or pN (%) */
+#define BOXSHADOW_STYLE			"nsBoxShadow"	/* "dx dy blur #rrggbbaa" */
+#define TEXTSHADOW_STYLE		"nsTextShadow"	/* "dx dy #rrggbb" */
 #define STYLE_NEED_TO_POP_ROW	"nsNeedToPopRow"
 /* nscss: generated content (::before, ::after): the text, and with
  * "Color", "Bg", "Font", "Block" after the name its styles */

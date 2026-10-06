@@ -379,6 +379,7 @@ typedef struct lo_TableRec_struct {
 	int32 flex_next_cross;
 	intn flex_next_align;
 	struct lo_CSSGridRec_struct *grid;	/* LO_FLEX_GRID: laycssgrid.c */
+	Bool css_fixed_layout;	/* table-layout: fixed (with a width) */
 	int32 grid_next_lines[4];
 	intn grid_next_justify;
 } lo_TableRec;

@@ -35,6 +35,7 @@
 #include <libcss/libcss.h>
 
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,6 +116,13 @@
 /* ::first-letter: "color|background|font|size" (empty parts unset) */
 #define FIRST_LETTER_PROP		"nsFirstLetter"
 #define TABLESPACING_PROP		"nsTableSpacing"
+#define TABLELAYOUT_PROP		"nsTableLayout"
+/* rounded corners: eight radii (top left, top right, bottom right, bottom
+ * left; horizontal, vertical), px or "pN" (N% of the box); a box-shadow:
+ * "dx dy blur #rrggbbaa" in px */
+#define RADIUS_PROP				"nsRadius"
+#define BOXSHADOW_PROP			"nsBoxShadow"
+#define TEXTSHADOW_PROP			"nsTextShadow"	/* "dx dy #rrggbb" */
 #define GRIDJUSTIFYSELF_PROP	"nsGridJustifySelf"
 #define BORDERTOPWIDTH_PROP		"borderTopWidth"
 #define BORDERRIGHTWIDTH_PROP	"borderRightWidth"
@@ -2304,11 +2312,707 @@ nscss_export_position(NSCSS_Doc *doc, const css_computed_style *st,
 	}
 }
 
+static const char *nscss_attr_named(NSCSS_Node *node, const char *name,
+									size_t len);
+
+/* A table's cell spacing: border-spacing (horizontal), none if the
+ * borders collapse */
+static void
+nscss_table_spacing(NSCSS_Doc *doc, const css_computed_style *st,
+					StyleStruct *style)
+{
+	css_fixed hs = 0, vs = 0;
+	css_unit hu = CSS_UNIT_PX, vu = CSS_UNIT_PX;
+	char buf[40];
+
+	if (css_computed_table_layout(st) == CSS_TABLE_LAYOUT_FIXED)
+		nscss_set(style, TABLELAYOUT_PROP, "fixed");
+	if (css_computed_border_collapse(st) == CSS_BORDER_COLLAPSE_COLLAPSE) {
+		nscss_set(style, TABLESPACING_PROP, "0px");
+		return;
+	}
+	if (css_computed_border_spacing(st, &hs, &hu, &vs, &vu) ==
+		CSS_BORDER_SPACING_SET && hs >= 0 && nscss_len(doc, buf, hs, hu))
+		nscss_set(style, TABLESPACING_PROP, buf);
+}
+
 /* HTML's table tags (layout makes their tables itself) */
 static const char *const nscss_table_tags_x[] = {
 	"table", "caption", "thead", "tbody", "tfoot", "tr", "td", "th",
 	"col", "colgroup", NULL
 };
+
+/* ---- gradients (background-image: linear-gradient(...) and the like):
+ * libcss keeps them as "nscss-gradient:" + their text; layout draws images,
+ * so they become one: a PNG in a data: URL, or a colour if they are one
+ * colour ---------------------------------------------------------------- */
+
+typedef struct {
+	double r, g, b, a;
+} nscss_rgba;
+
+static const struct { const char *name; unsigned rgb; } nscss_named[] = {
+	{ "black", 0x000000 }, { "white", 0xffffff }, { "red", 0xff0000 },
+	{ "green", 0x008000 }, { "lime", 0x00ff00 }, { "blue", 0x0000ff },
+	{ "yellow", 0xffff00 }, { "orange", 0xffa500 }, { "purple", 0x800080 },
+	{ "gray", 0x808080 }, { "grey", 0x808080 }, { "silver", 0xc0c0c0 },
+	{ "navy", 0x000080 }, { "teal", 0x008080 }, { "aqua", 0x00ffff },
+	{ "cyan", 0x00ffff }, { "fuchsia", 0xff00ff }, { "magenta", 0xff00ff },
+	{ "maroon", 0x800000 }, { "olive", 0x808000 }, { "pink", 0xffc0cb },
+	{ "brown", 0xa52a2a }, { "gold", 0xffd700 }, { "indigo", 0x4b0082 },
+	{ "violet", 0xee82ee }, { "lightgray", 0xd3d3d3 },
+	{ "lightgrey", 0xd3d3d3 }, { "darkgray", 0xa9a9a9 },
+	{ "darkgrey", 0xa9a9a9 }, { "lightblue", 0xadd8e6 },
+	{ "darkblue", 0x00008b }, { "darkgreen", 0x006400 },
+	{ "darkred", 0x8b0000 }, { "skyblue", 0x87ceeb },
+	{ "steelblue", 0x4682b4 }, { "tomato", 0xff6347 },
+	{ "crimson", 0xdc143c }, { "coral", 0xff7f50 },
+	{ "salmon", 0xfa8072 }, { "khaki", 0xf0e68c }, { "beige", 0xf5f5dc },
+	{ "ivory", 0xfffff0 }, { "lavender", 0xe6e6fa },
+	{ "whitesmoke", 0xf5f5f5 }, { "gainsboro", 0xdcdcdc },
+	{ "rebeccapurple", 0x663399 }, { NULL, 0 }
+};
+
+/* the numbers in "fn(a, b c / d)" (percentages as fractions of PCT_OF) */
+static int
+nscss_fn_args(const char *s, double *v, int max, double pct_of)
+{
+	int n = 0;
+	char *e;
+
+	while (*s && *s != '(')
+		s++;
+	while (*s && n < max) {
+		double d;
+
+		while (*s && (*s == '(' || *s == ',' || *s == ' ' || *s == '/'))
+			s++;
+		if (!*s || *s == ')')
+			break;
+		d = strtod(s, &e);
+		if (e == s)
+			break;
+		if (*e == '%') {
+			d = d * pct_of / 100;
+			e++;
+		} else if (!strncasecomp(e, "deg", 3)) {
+			e += 3;
+		} else if (!strncasecomp(e, "turn", 4)) {
+			d *= 360;
+			e += 4;
+		}
+		v[n++] = d;
+		s = e;
+	}
+	return n;
+}
+
+static double
+nscss_hue(double p, double q, double t)
+{
+	if (t < 0) t += 1;
+	if (t > 1) t -= 1;
+	if (t < 1.0 / 6) return p + (q - p) * 6 * t;
+	if (t < 0.5) return q;
+	if (t < 2.0 / 3) return p + (q - p) * (2.0 / 3 - t) * 6;
+	return p;
+}
+
+/* a colour (#hex, rgb(), rgba(), hsl(), hsla(), a name, transparent) */
+static XP_Bool
+nscss_parse_color(const char *s, nscss_rgba *c)
+{
+	double v[4];
+	int n, k;
+
+	c->a = 1;
+	if (s[0] == '#') {
+		unsigned long x = strtoul(s + 1, NULL, 16);
+		size_t len = strspn(s + 1, "0123456789abcdefABCDEF");
+
+		if (len == 3 || len == 4) {
+			unsigned long r = (x >> (len == 4 ? 12 : 8)) & 15;
+			unsigned long g = (x >> (len == 4 ? 8 : 4)) & 15;
+			unsigned long b = (x >> (len == 4 ? 4 : 0)) & 15;
+
+			c->r = r * 17; c->g = g * 17; c->b = b * 17;
+			if (len == 4)
+				c->a = (x & 15) / 15.0;
+			return TRUE;
+		}
+		if (len == 6 || len == 8) {
+			if (len == 8) {
+				c->a = (x & 255) / 255.0;
+				x >>= 8;
+			}
+			c->r = (x >> 16) & 255; c->g = (x >> 8) & 255; c->b = x & 255;
+			return TRUE;
+		}
+		return FALSE;
+	}
+	if (!strncasecomp(s, "rgb", 3)) {
+		n = nscss_fn_args(s, v, 4, 255);
+		if (n < 3)
+			return FALSE;
+		c->r = v[0]; c->g = v[1]; c->b = v[2];
+		if (n == 4)
+			c->a = v[3] > 1 ? v[3] / 255 : v[3];
+		return TRUE;
+	}
+	if (!strncasecomp(s, "hsl", 3)) {
+		double h, sat, l, q, p;
+
+		n = nscss_fn_args(s, v, 4, 1);
+		if (n < 3)
+			return FALSE;
+		h = v[0] / 360; sat = v[1]; l = v[2];
+		h -= (long)h;
+		if (h < 0) h += 1;
+		q = l < 0.5 ? l * (1 + sat) : l + sat - l * sat;
+		p = 2 * l - q;
+		c->r = 255 * nscss_hue(p, q, h + 1.0 / 3);
+		c->g = 255 * nscss_hue(p, q, h);
+		c->b = 255 * nscss_hue(p, q, h - 1.0 / 3);
+		if (n == 4)
+			c->a = v[3];
+		return TRUE;
+	}
+	if (!strncasecomp(s, "transparent", 11)) {
+		c->r = c->g = c->b = 0;
+		c->a = 0;
+		return TRUE;
+	}
+	for (k = 0; nscss_named[k].name; k++)
+		if (!strncasecomp(s, nscss_named[k].name, strlen(nscss_named[k].name)) &&
+			!isalpha((unsigned char) s[strlen(nscss_named[k].name)])) {
+			c->r = (nscss_named[k].rgb >> 16) & 255;
+			c->g = (nscss_named[k].rgb >> 8) & 255;
+			c->b = nscss_named[k].rgb & 255;
+			return TRUE;
+		}
+	return FALSE;
+}
+
+static unsigned long
+nscss_crc(unsigned long crc, const unsigned char *p, size_t n)
+{
+	static unsigned long table[256];
+	static int made;
+	size_t i;
+	int k;
+
+	if (!made) {
+		for (i = 0; i < 256; i++) {
+			unsigned long c = i;
+
+			for (k = 0; k < 8; k++)
+				c = c & 1 ? 0xedb88320UL ^ (c >> 1) : c >> 1;
+			table[i] = c;
+		}
+		made = 1;
+	}
+	crc ^= 0xffffffffUL;
+	for (i = 0; i < n; i++)
+		crc = table[(crc ^ p[i]) & 255] ^ (crc >> 8);
+	return crc ^ 0xffffffffUL;
+}
+
+static void
+nscss_be32(unsigned char *p, unsigned long v)
+{
+	p[0] = (v >> 24) & 255; p[1] = (v >> 16) & 255;
+	p[2] = (v >> 8) & 255; p[3] = v & 255;
+}
+
+/* A W x H RGB image (RGB, rows of 3 * W bytes) as "data:image/png;base64,"
+ * (malloc'd): stored deflate blocks, no compression library. */
+static char *
+nscss_png_data_url(const unsigned char *rgb, int w, int h)
+{
+	static const char b64[] =
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	size_t raw_len = (size_t) h * (3 * w + 1), z_len, png_len, i, o;
+	size_t blocks = raw_len / 65535 + 1;
+	unsigned char *raw, *png, *z;
+	unsigned long a1 = 1, a2 = 0;
+	char *out;
+	int y;
+
+	raw = (unsigned char *) XP_ALLOC(raw_len);
+	if (!raw)
+		return NULL;
+	for (y = 0; y < h; y++) {
+		raw[y * (3 * w + 1)] = 0;	/* no filter */
+		XP_MEMCPY(raw + y * (3 * w + 1) + 1, rgb + (size_t) y * 3 * w, 3 * w);
+	}
+	z_len = 2 + raw_len + blocks * 5 + 4;
+	png_len = 8 + 25 + 12 + z_len + 12;
+	png = (unsigned char *) XP_ALLOC(png_len);
+	if (!png) {
+		XP_FREE(raw);
+		return NULL;
+	}
+	XP_MEMCPY(png, "\x89PNG\r\n\x1a\n", 8);
+	/* IHDR */
+	nscss_be32(png + 8, 13);
+	XP_MEMCPY(png + 12, "IHDR", 4);
+	nscss_be32(png + 16, w);
+	nscss_be32(png + 20, h);
+	png[24] = 8; png[25] = 2; png[26] = 0; png[27] = 0; png[28] = 0;
+	nscss_be32(png + 29, nscss_crc(0, png + 12, 17));
+	/* IDAT: zlib header, stored blocks, adler32 */
+	nscss_be32(png + 33, z_len);
+	XP_MEMCPY(png + 37, "IDAT", 4);
+	z = png + 41;
+	o = 0;
+	z[o++] = 0x78;
+	z[o++] = 0x01;
+	for (i = 0; i < raw_len || i == 0; ) {
+		size_t n = raw_len - i > 65535 ? 65535 : raw_len - i;
+
+		z[o++] = i + n >= raw_len ? 1 : 0;
+		z[o++] = n & 255; z[o++] = n >> 8;
+		z[o++] = ~n & 255; z[o++] = (~n >> 8) & 255;
+		XP_MEMCPY(z + o, raw + i, n);
+		o += n;
+		i += n;
+		if (n == 0)
+			break;
+	}
+	for (i = 0; i < raw_len; i++) {
+		a1 = (a1 + raw[i]) % 65521;
+		a2 = (a2 + a1) % 65521;
+	}
+	nscss_be32(z + o, (a2 << 16) | a1);
+	o += 4;
+	nscss_be32(png + 33, o);
+	nscss_be32(png + 41 + o, nscss_crc(0, png + 37, 4 + o));
+	o += 41 + 4;
+	nscss_be32(png + o, 0);
+	XP_MEMCPY(png + o + 4, "IEND", 4);
+	nscss_be32(png + o + 8, nscss_crc(0, png + o + 4, 4));
+	png_len = o + 12;
+	XP_FREE(raw);
+
+	out = (char *) XP_ALLOC(22 + (png_len + 2) / 3 * 4 + 1);
+	if (out) {
+		XP_STRCPY(out, "data:image/png;base64,");
+		o = 22;
+		for (i = 0; i < png_len; i += 3) {
+			unsigned long v = (unsigned long) png[i] << 16;
+
+			if (i + 1 < png_len) v |= (unsigned long) png[i + 1] << 8;
+			if (i + 2 < png_len) v |= png[i + 2];
+			out[o++] = b64[(v >> 18) & 63];
+			out[o++] = b64[(v >> 12) & 63];
+			out[o++] = i + 1 < png_len ? b64[(v >> 6) & 63] : '=';
+			out[o++] = i + 2 < png_len ? b64[v & 63] : '=';
+		}
+		out[o] = '\0';
+	}
+	XP_FREE(png);
+	return out;
+}
+
+#define NSCSS_MAX_STOPS 16
+
+/* Draw the gradient TEXT ("linear-gradient(...)") on BOX_W x BOX_H (0:
+ * unknown) over BG: as a colour (*SOLID) if it has one colour, else as an
+ * image (malloc'd data: URL) with how it repeats (*REPEAT) and the colour
+ * beyond it (*FILL: its last). */
+static char *
+nscss_gradient_image(const char *text, int box_w, int box_h, nscss_rgba bg,
+					 nscss_rgba *solid, XP_Bool *is_solid, const char **repeat,
+					 nscss_rgba *fill)
+{
+	char args[NSCSS_MAX_STOPS + 2][96];
+	nscss_rgba col[NSCSS_MAX_STOPS];
+	double pos[NSCSS_MAX_STOPS];
+	int nargs = 0, nstops = 0, depth = 0, k, j, first = 0, w, h, x, y;
+	double angle = 180, len, period = 0;
+	XP_Bool radial = !strncasecomp(text, "radial", 6) ||
+		!strncasecomp(text, "repeating-radial", 16);
+	XP_Bool repeating = !strncasecomp(text, "repeating", 9);
+	const char *p = strchr(text, '(');
+	size_t n = 0;
+	unsigned char *rgb;
+	char *url;
+
+	*is_solid = FALSE;
+	if (!p)
+		return NULL;
+	/* the arguments, split at commas outside parentheses */
+	for (p++; *p && nargs < NSCSS_MAX_STOPS + 2; p++) {
+		if (*p == '(')
+			depth++;
+		if (*p == ')' && depth-- == 0)
+			break;
+		if (*p == ',' && depth == 0) {
+			args[nargs][n] = '\0';
+			nargs++;
+			n = 0;
+			continue;
+		}
+		if (n == 0 && *p == ' ')
+			continue;
+		if (n < sizeof args[0] - 1)
+			args[nargs][n++] = *p;
+	}
+	args[nargs][n] = '\0';
+	nargs++;
+	/* the direction (linear) or shape (radial: ignored) */
+	if (radial) {
+		if (!nscss_parse_color(args[0], &col[0]))
+			first = 1;
+	} else if (!strncasecomp(args[0], "to ", 3)) {
+		XP_Bool top = strstr(args[0], "top") != NULL;
+		XP_Bool bottom = strstr(args[0], "bottom") != NULL;
+		XP_Bool left = strstr(args[0], "left") != NULL;
+		XP_Bool right = strstr(args[0], "right") != NULL;
+
+		angle = top ? (left ? 315 : right ? 45 : 0)
+			: bottom ? (left ? 225 : right ? 135 : 180)
+			: left ? 270 : 90;
+		first = 1;
+	} else if (isdigit((unsigned char) args[0][0]) || args[0][0] == '-' ||
+			   args[0][0] == '.') {
+		char *e;
+
+		angle = strtod(args[0], &e);
+		if (!strncasecomp(e, "turn", 4))
+			angle *= 360;
+		else if (!strncasecomp(e, "rad", 3))
+			angle = angle * 180 / 3.14159265358979;
+		else if (!strncasecomp(e, "grad", 4))
+			angle = angle * 0.9;
+		first = 1;
+	}
+	/* the colour stops: a colour and (perhaps) a position */
+	for (k = first; k < nargs && nstops < NSCSS_MAX_STOPS; k++) {
+		char *sp;
+
+		if (!nscss_parse_color(args[k], &col[nstops]))
+			continue;
+		pos[nstops] = -1;
+		/* the position: after the colour (past its parentheses) */
+		sp = args[k];
+		if (strchr(sp, ')'))
+			sp = strrchr(sp, ')') + 1;
+		else
+			sp = strchr(sp, ' ');
+		while (sp && *sp == ' ')
+			sp++;
+		if (sp && *sp) {
+			char *e;
+			double d = strtod(sp, &e);
+
+			if (e != sp)
+				pos[nstops] = *e == '%' ? d / 100 : -2 - d;	/* px: later */
+		}
+		nstops++;
+	}
+	if (nstops == 0)
+		return NULL;
+	/* alpha: over the box's background */
+	for (k = 0; k < nstops; k++) {
+		col[k].r = col[k].r * col[k].a + bg.r * (1 - col[k].a);
+		col[k].g = col[k].g * col[k].a + bg.g * (1 - col[k].a);
+		col[k].b = col[k].b * col[k].a + bg.b * (1 - col[k].a);
+		col[k].a = 1;
+	}
+	*fill = col[nstops - 1];
+	for (k = 1; k < nstops; k++)
+		if ((int) col[k].r != (int) col[0].r || (int) col[k].g != (int) col[0].g ||
+			(int) col[k].b != (int) col[0].b)
+			break;
+	if (k == nstops) {
+		*solid = col[0];
+		*is_solid = TRUE;
+		return NULL;
+	}
+	/* the image: a strip along the gradient if it is vertical or
+	 * horizontal (the other way it repeats), else the box */
+	while (angle < 0) angle += 360;
+	while (angle >= 360) angle -= 360;
+	if (radial) {
+		w = box_w > 0 ? box_w : 100;
+		h = box_h > 0 ? box_h : 100;
+		*repeat = "no-repeat";
+	} else if (angle == 180 || angle == 0) {
+		w = 1;
+		h = box_h > 0 ? box_h : 100;
+		*repeat = "repeat-x";
+	} else if (angle == 90 || angle == 270) {
+		w = box_w > 0 ? box_w : 300;
+		h = 1;
+		*repeat = "repeat-y";
+	} else if (box_w > 0 && box_h > 0 && (long) box_w * box_h <= 160000) {
+		w = box_w;
+		h = box_h;
+		*repeat = "no-repeat";
+	} else {
+		/* (no size: the nearer axis) */
+		w = 1;
+		h = box_h > 0 ? box_h : 100;
+		angle = (angle > 90 && angle < 270) ? 180 : 0;
+		*repeat = "repeat-x";
+	}
+	{
+		double a = angle * 3.14159265358979 / 180;
+		double sx = sin(a), sy = -cos(a);
+
+		len = radial ? sqrt((double) w * w + (double) h * h) / 2
+			: fabs(w * sx) + fabs(h * sy);
+		if (len <= 0)
+			len = 1;
+		/* positions: px into fractions, missing ones spread evenly */
+		for (k = 0; k < nstops; k++)
+			if (pos[k] <= -2)
+				pos[k] = (-2 - pos[k]) / len;
+		if (pos[0] < 0)
+			pos[0] = 0;
+		if (pos[nstops - 1] < 0)
+			pos[nstops - 1] = 1;
+		for (k = 1; k < nstops; k++) {
+			if (pos[k] >= 0) {
+				if (pos[k] < pos[k - 1])
+					pos[k] = pos[k - 1];
+				continue;
+			}
+			for (j = k; j < nstops && pos[j] < 0; j++)
+				;
+			{
+				int m;
+
+				for (m = k; m < j; m++)
+					pos[m] = pos[k - 1] + (pos[j] - pos[k - 1]) *
+						(m - k + 1) / (j - k + 1);
+			}
+		}
+		period = pos[nstops - 1] - pos[0];
+		rgb = (unsigned char *) XP_ALLOC((size_t) w * h * 3);
+		if (!rgb)
+			return NULL;
+		for (y = 0; y < h; y++)
+			for (x = 0; x < w; x++) {
+				double t, dx = x + 0.5 - w / 2.0, dy = y + 0.5 - h / 2.0;
+				nscss_rgba c;
+				unsigned char *o = rgb + ((size_t) y * w + x) * 3;
+
+				t = radial ? sqrt(dx * dx + dy * dy) / len
+					: (dx * sx + dy * sy) / len + 0.5;
+				if (repeating && period > 0) {
+					t = (t - pos[0]) / period;
+					t = pos[0] + (t - floor(t)) * period;
+				}
+				if (t <= pos[0])
+					c = col[0];
+				else if (t >= pos[nstops - 1])
+					c = col[nstops - 1];
+				else {
+					for (k = 1; k < nstops && pos[k] < t; k++)
+						;
+					{
+						double span = pos[k] - pos[k - 1];
+						double f = span > 0 ? (t - pos[k - 1]) / span : 1;
+
+						c.r = col[k - 1].r + (col[k].r - col[k - 1].r) * f;
+						c.g = col[k - 1].g + (col[k].g - col[k - 1].g) * f;
+						c.b = col[k - 1].b + (col[k].b - col[k - 1].b) * f;
+					}
+				}
+				o[0] = (unsigned char) (c.r + 0.5);
+				o[1] = (unsigned char) (c.g + 0.5);
+				o[2] = (unsigned char) (c.b + 0.5);
+			}
+	}
+	url = nscss_png_data_url(rgb, w, h);
+	XP_FREE(rgb);
+	return url;
+}
+
+/* A length in a value's text ("10px", "1.5em", "50%"): pixels, or (a
+ * percentage) -1 with *PCT set; FONT is the element's font size (px) */
+static double
+nscss_text_len(NSCSS_Doc *doc, const char *s, double font, double *pct)
+{
+	char *e;
+	double v = strtod(s, &e);
+	css_unit unit = CSS_UNIT_PX;
+	char buf[48];
+
+	*pct = -1;
+	if (e == s)
+		return 0;
+	if (*e == '%') {
+		*pct = v;
+		return -1;
+	}
+	if (!strncasecomp(e, "em", 2))
+		return v * font;
+	if (!strncasecomp(e, "rem", 3))
+		unit = CSS_UNIT_REM;
+	else if (!strncasecomp(e, "pt", 2))
+		return v * 4 / 3;
+	else if (!strncasecomp(e, "vw", 2))
+		unit = CSS_UNIT_VW;
+	else if (!strncasecomp(e, "vh", 2))
+		unit = CSS_UNIT_VH;
+	else
+		return v;				/* px, or no unit (0) */
+	if (nscss_len(doc, buf, FLTTOFIX(v), unit))
+		return atof(buf);
+	return v;
+}
+
+/* border-radius and box-shadow, for a block's box */
+static void
+nscss_export_decorations(NSCSS_Doc *doc, const css_computed_style *st,
+						 StyleStruct *style)
+{
+	lwc_string *r[4], *sh = NULL;
+	css_fixed fs;
+	css_unit fu;
+	double font = 16, pct;
+	char out[200];
+	int k;
+
+	if (css_computed_font_size(st, &fs, &fu) == CSS_FONT_SIZE_DIMENSION &&
+		fu == CSS_UNIT_PX)
+		font = FIXTOFLT(fs);
+	css_computed_border_top_left_radius(st, &r[0]);
+	css_computed_border_top_right_radius(st, &r[1]);
+	css_computed_border_bottom_right_radius(st, &r[2]);
+	css_computed_border_bottom_left_radius(st, &r[3]);
+	if (r[0] || r[1] || r[2] || r[3]) {
+		out[0] = '\0';
+		for (k = 0; k < 4; k++) {
+			const char *t = r[k] ? lwc_string_data(r[k]) : "0";
+			const char *v2 = strchr(t, ' ');
+			double h = nscss_text_len(doc, t, font, &pct), hp = pct;
+			double v = v2 ? nscss_text_len(doc, v2 + 1, font, &pct) : h;
+			double vp = v2 ? pct : hp;
+			size_t n = strlen(out);
+
+			if (hp >= 0)
+				PR_snprintf(out + n, sizeof out - n, "p%g ", hp);
+			else
+				PR_snprintf(out + n, sizeof out - n, "%d ", (int) (h + 0.5));
+			n = strlen(out);
+			if (vp >= 0)
+				PR_snprintf(out + n, sizeof out - n, "p%g ", vp);
+			else
+				PR_snprintf(out + n, sizeof out - n, "%d ", (int) (v + 0.5));
+		}
+		nscss_set(style, RADIUS_PROP, out);
+	}
+	/* the first shadow that is not inset: offsets, blur, colour */
+	css_computed_box_shadow(st, &sh);
+	if (sh) {
+		const char *t = lwc_string_data(sh);
+		double num[4];
+		int nn = 0;
+		nscss_rgba c;
+		XP_Bool have_color = FALSE, inset = FALSE;
+		const char *p = t;
+
+		c.r = c.g = c.b = 0;
+		c.a = 1;
+		while (*p && *p != ',') {
+			while (*p == ' ')
+				p++;
+			if (!*p || *p == ',')
+				break;
+			if (!strncasecomp(p, "inset", 5))
+				inset = TRUE;
+			else if (isdigit((unsigned char) *p) || *p == '-' || *p == '.') {
+				if (nn < 4)
+					num[nn++] = nscss_text_len(doc, p, font, &pct);
+			} else if (nscss_parse_color(p, &c))
+				have_color = TRUE;
+			/* past the token (and a function's parentheses) */
+			{
+				int depth = 0;
+
+				while (*p && (depth > 0 || (*p != ' ' && *p != ','))) {
+					if (*p == '(')
+						depth++;
+					else if (*p == ')')
+						depth--;
+					p++;
+				}
+			}
+		}
+		if (nn >= 2 && !inset) {
+			if (!have_color) {
+				c.r = c.g = c.b = 0;
+				c.a = 0.5;
+			}
+			PR_snprintf(out, sizeof out, "%d %d %d #%02x%02x%02x%02x",
+						(int) num[0], (int) num[1], nn > 2 ? (int) num[2] : 0,
+						(int) (c.r + 0.5), (int) (c.g + 0.5), (int) (c.b + 0.5),
+						(int) (c.a * 255 + 0.5));
+			nscss_set(style, BOXSHADOW_PROP, out);
+		}
+	}
+}
+
+/* A block's gradient background: its image, or its colour */
+static void
+nscss_export_gradient(NSCSS_Doc *doc, const css_computed_style *st,
+					  StyleStruct *style, const char *text)
+{
+	css_fixed len;
+	css_unit unit;
+	css_color c;
+	nscss_rgba bg, solid, fill;
+	XP_Bool is_solid;
+	const char *repeat = "repeat";
+	int w = 0, h = 0;
+	char *url, buf[40];
+
+	if (css_computed_width(st, &len, &unit) == CSS_WIDTH_SET &&
+		unit == CSS_UNIT_PX && !nscss_marked(len, unit, NSCSS_FIX_MARK_POS))
+		w = FIXTOINT(len);
+	if (css_computed_height(st, &len, &unit) == CSS_HEIGHT_SET &&
+		unit == CSS_UNIT_PX && !nscss_marked(len, unit, NSCSS_FIX_MARK_POS))
+		h = FIXTOINT(len);
+	bg.r = bg.g = bg.b = 255;
+	bg.a = 1;
+	if (css_computed_background_color(st, &c) == CSS_BACKGROUND_COLOR_COLOR &&
+		c != NSCSS_COLOR_MARK && (c >> 24) != 0) {
+		bg.r = (c >> 16) & 255; bg.g = (c >> 8) & 255; bg.b = c & 255;
+	}
+	url = nscss_gradient_image(text, w, h, bg, &solid, &is_solid, &repeat,
+							   &fill);
+	if (is_solid) {
+		PR_snprintf(buf, sizeof buf, "#%02x%02x%02x", (int) (solid.r + 0.5),
+					(int) (solid.g + 0.5), (int) (solid.b + 0.5));
+		nscss_set(style, BGCOLOR_PROP, buf);
+		nscss_set(style, BGIMAGE_PROP, "none");
+		return;
+	}
+	if (!url)
+		return;
+	{
+		char *v = PR_smprintf("url(%s)", url);
+
+		if (v) {
+			nscss_set(style, BGIMAGE_PROP, v);
+			XP_FREE(v);
+		}
+	}
+	XP_FREE(url);
+	nscss_set(style, BGREPEAT_PROP, repeat);
+	/* beyond the image: the last colour (unless the box has one) */
+	if (!(css_computed_background_color(st, &c) == CSS_BACKGROUND_COLOR_COLOR &&
+		  c != NSCSS_COLOR_MARK && (c >> 24) != 0)) {
+		PR_snprintf(buf, sizeof buf, "#%02x%02x%02x", (int) (fill.r + 0.5),
+					(int) (fill.g + 0.5), (int) (fill.b + 0.5));
+		nscss_set(style, BGCOLOR_PROP, buf);
+	}
+	(void) doc;
+}
 
 /* replaced elements: sized by the style sheet even inline */
 static const char *const nscss_replaced_tags[] = {
@@ -2423,17 +3127,11 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 
 	/* CSS tables: layout makes them of its own table parts */
 	if (!nscss_name_in(node, nscss_table_tags_x)) {
-		css_fixed hs = 0, vs = 0;
-		css_unit hu = CSS_UNIT_PX, vu = CSS_UNIT_PX;
-
 		switch (css_computed_display_static(st)) {
 		case CSS_DISPLAY_TABLE:
 		case CSS_DISPLAY_INLINE_TABLE:
 			nscss_set(style, TABLEPART_PROP, "table");
-			if (css_computed_border_spacing(st, &hs, &hu, &vs, &vu) ==
-				CSS_BORDER_SPACING_SET && hs > 0 &&
-				nscss_len(doc, buf, hs, hu))
-				nscss_set(style, TABLESPACING_PROP, buf);
+			nscss_table_spacing(doc, st, style);
 			break;
 		case CSS_DISPLAY_TABLE_ROW:
 			nscss_set(style, TABLEPART_PROP, "row");
@@ -2444,6 +3142,13 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		default:
 			break;
 		}
+	} else if (!strcasecomp(lwc_string_data(node->name), "table")) {
+		/* an HTML table's border-spacing (its cellspacing attribute, a
+		 * presentational hint, wins: nscss has no hints) */
+		if (!nscss_attr_named(node, "cellspacing", 11))
+			nscss_table_spacing(doc, st, style);
+		else if (css_computed_table_layout(st) == CSS_TABLE_LAYOUT_FIXED)
+			nscss_set(style, TABLELAYOUT_PROP, "fixed");
 	}
 
 	/* Inherited properties.  Under a parent, libcss leaves the ones no
@@ -2490,11 +3195,71 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		}
 	}
 
+	/* text-shadow (the first; its blur is not drawn, its alpha blended
+	 * with white) */
+	{
+		lwc_string *ts = NULL;
+
+		css_computed_text_shadow(st, &ts);
+		if (ts) {
+			const char *p = lwc_string_data(ts);
+			double num[3], pct, font = 16;
+			int nn = 0;
+			nscss_rgba c;
+			XP_Bool have_color = FALSE;
+			css_fixed fs;
+			css_unit fu;
+			css_color col;
+
+			if (css_computed_font_size(st, &fs, &fu) ==
+				CSS_FONT_SIZE_DIMENSION && fu == CSS_UNIT_PX)
+				font = FIXTOFLT(fs);
+			while (*p && *p != ',') {
+				int depth = 0;
+
+				while (*p == ' ')
+					p++;
+				if (!*p || *p == ',')
+					break;
+				if (isdigit((unsigned char) *p) || *p == '-' || *p == '.') {
+					if (nn < 3)
+						num[nn++] = nscss_text_len(doc, p, font, &pct);
+				} else if (nscss_parse_color(p, &c))
+					have_color = TRUE;
+				while (*p && (depth > 0 || (*p != ' ' && *p != ','))) {
+					if (*p == '(')
+						depth++;
+					else if (*p == ')')
+						depth--;
+					p++;
+				}
+			}
+			if (nn >= 2) {
+				if (!have_color && css_computed_color(st, &col) ==
+					CSS_COLOR_COLOR) {
+					c.r = (col >> 16) & 255; c.g = (col >> 8) & 255;
+					c.b = col & 255; c.a = 1;
+				} else if (!have_color) {
+					c.r = c.g = c.b = 0;
+					c.a = 1;
+				}
+				PR_snprintf(buf, sizeof buf, "%d %d #%02x%02x%02x",
+							(int) num[0], (int) num[1],
+							(int) (c.r * c.a + 255 * (1 - c.a) + 0.5),
+							(int) (c.g * c.a + 255 * (1 - c.a) + 0.5),
+							(int) (c.b * c.a + 255 * (1 - c.a) + 0.5));
+				nscss_set(style, TEXTSHADOW_PROP, buf);
+			}
+		}
+	}
+
 	/* Positioned elements are layers (layout lays their content out apart
 	 * and puts it where the offsets say); their box goes with them. */
 	nscss_export_position(doc, st, style);
-	if (block)
+	if (block) {
 		nscss_export_box(doc, node, st, style);
+		nscss_export_decorations(doc, st, style);
+	}
 
 	/* Images and the like are sized by the style sheet as they are,
 	 * inline: width, height, max-width (layimage.c). */
@@ -2523,7 +3288,26 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	case CSS_VERTICAL_ALIGN_MIDDLE: nscss_set(style, VALIGN_PROP, "middle"); break;
 	case CSS_VERTICAL_ALIGN_BOTTOM: nscss_set(style, VALIGN_PROP, "bottom"); break;
 	case CSS_VERTICAL_ALIGN_TEXT_BOTTOM: nscss_set(style, VALIGN_PROP, "text-bottom"); break;
-	default: break;				/* the marker, lengths, sub, super */
+	/* sub, super and lengths raise or lower an inline element (not HTML's
+	 * sub and sup: their tags do it themselves) */
+	case CSS_VERTICAL_ALIGN_SUB:
+	case CSS_VERTICAL_ALIGN_SUPER:
+		if (strcasecomp(lwc_string_data(node->name), "sub") &&
+			strcasecomp(lwc_string_data(node->name), "sup"))
+			nscss_set(style, VALIGN_PROP,
+					  css_computed_vertical_align(st, &len, &unit) ==
+					  CSS_VERTICAL_ALIGN_SUB ? "sub" : "super");
+		break;
+	case CSS_VERTICAL_ALIGN_SET:
+		if (!nscss_marked(len, unit, NSCSS_FIX_MARK_LEN) &&
+			!nscss_marked(len, unit, NSCSS_FIX_MARK_POS) && len != 0) {
+			if (unit == CSS_UNIT_PCT)
+				PR_snprintf(buf, sizeof buf, "%g%%", FIXTOFLT(len));
+			if (unit == CSS_UNIT_PCT || nscss_len(doc, buf, len, unit))
+				nscss_set(style, VALIGN_PROP, buf);
+		}
+		break;
+	default: break;				/* the marker */
 	}
 
 	if (css_computed_background_color(st, &c) == CSS_BACKGROUND_COLOR_COLOR &&
@@ -2535,6 +3319,8 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		css_computed_background_image(st, &url);
 		if (url == NULL) {
 			nscss_set(style, BGIMAGE_PROP, "none");
+		} else if (!strncmp(lwc_string_data(url), "nscss-gradient:", 15)) {
+			nscss_export_gradient(doc, st, style, lwc_string_data(url) + 15);
 		} else if (strncmp(lwc_string_data(url), "about:nscss-unset", 17)) {
 			PR_snprintf(buf, sizeof buf, "url(%.*s)",
 						(int) lwc_string_length(url), lwc_string_data(url));
