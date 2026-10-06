@@ -278,6 +278,11 @@ qjs_ns_load(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
 			}
 			JS_FreeCString(cx, body);
 		}
+		/* an empty body still ends the request's head (NET_WritePostData) */
+		if (!us->post_data) {
+			us->post_data = XP_STRDUP("");
+			us->post_data_size = 0;
+		}
 	}
 	if (JS_IsString(argv[3])) {
 		const char *h = JS_ToCString(cx, argv[3]);
@@ -286,6 +291,14 @@ qjs_ns_load(JSContext *cx, JSValueConst this_val, int argc, JSValueConst *argv)
 				StrAllocCopy(us->post_headers, h);
 			JS_FreeCString(cx, h);
 		}
+	}
+	if (post) {
+		/* the body's length, which the page cannot set: servers (and
+		 * HTTP/2) want it; NET_WritePostData ends the head after these */
+		char len[48];
+		PR_snprintf(len, sizeof len, "Content-Length: %ld\r\n",
+					(long) us->post_data_size);
+		StrAllocCat(us->post_headers, len);
 	}
 	{
 		History_entry *he = SHIST_GetCurrent(&decoder->window_context->hist);
