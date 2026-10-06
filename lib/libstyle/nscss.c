@@ -68,6 +68,10 @@
 #define IMGWIDTH_PROP			"nsImageWidth"
 #define IMGHEIGHT_PROP			"nsImageHeight"
 #define HEIGHT_PROP				"height"
+#define MINWIDTH_PROP			"nsMinWidth"
+#define MAXWIDTH_BOX_PROP		"nsMaxWidth"
+#define MINHEIGHT_PROP			"nsMinHeight"
+#define MAXHEIGHT_PROP			"nsMaxHeight"
 #define BLOCKBOX_PROP			"nsBlockBox"	/* a block-level box */
 /* Flexbox, for layout's flex tables: the container's direction, its
  * justify-content, align-items and column gap; an item's "grow shrink
@@ -100,6 +104,17 @@
 #define GRIDJUSTIFY_PROP		"nsGridJustify"
 #define GRIDALIGNCONTENT_PROP	"nsGridAlignContent"
 #define GRIDITEM_PROP			"nsGridItem"
+/* CSS tables on elements that are not HTML's table tags: "table", "row" or
+ * "cell"; a table's border-spacing (horizontal) */
+#define TABLEPART_PROP			"nsTable"
+/* Generated content: an element's ::before and ::after text, and their
+ * colour, background, font ("bold", "italic") and whether they are
+ * blocks ("1").  Layout lays the text out at the element's start and end. */
+#define GEN_BEFORE_PROP			"nsBefore"
+#define GEN_AFTER_PROP			"nsAfter"
+/* ::first-letter: "color|background|font|size" (empty parts unset) */
+#define FIRST_LETTER_PROP		"nsFirstLetter"
+#define TABLESPACING_PROP		"nsTableSpacing"
 #define GRIDJUSTIFYSELF_PROP	"nsGridJustifySelf"
 #define BORDERTOPWIDTH_PROP		"borderTopWidth"
 #define BORDERRIGHTWIDTH_PROP	"borderRightWidth"
@@ -2289,6 +2304,12 @@ nscss_export_position(NSCSS_Doc *doc, const css_computed_style *st,
 	}
 }
 
+/* HTML's table tags (layout makes their tables itself) */
+static const char *const nscss_table_tags_x[] = {
+	"table", "caption", "thead", "tbody", "tfoot", "tr", "td", "th",
+	"col", "colgroup", NULL
+};
+
 /* replaced elements: sized by the style sheet even inline */
 static const char *const nscss_replaced_tags[] = {
 	"img", "object", "embed", "video", "canvas", "iframe", NULL
@@ -2299,8 +2320,8 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 			 const css_computed_style *ua_root, StyleStruct *style)
 {
 	static const char *const img_tags[] = { "img", NULL };
-	/* Layout paints background images itself only on these; elsewhere
-	 * it would wrap the element in a table and tile the whole image. */
+	/* Layout paints background images on these, and on blocks (their
+	 * box is a table cell); an inline element's would wrap it in a table. */
 	static const char *const bg_image_tags[] = {
 		"body", "table", "td", "th", NULL
 	};
@@ -2400,6 +2421,31 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		break;
 	}
 
+	/* CSS tables: layout makes them of its own table parts */
+	if (!nscss_name_in(node, nscss_table_tags_x)) {
+		css_fixed hs = 0, vs = 0;
+		css_unit hu = CSS_UNIT_PX, vu = CSS_UNIT_PX;
+
+		switch (css_computed_display_static(st)) {
+		case CSS_DISPLAY_TABLE:
+		case CSS_DISPLAY_INLINE_TABLE:
+			nscss_set(style, TABLEPART_PROP, "table");
+			if (css_computed_border_spacing(st, &hs, &hu, &vs, &vu) ==
+				CSS_BORDER_SPACING_SET && hs > 0 &&
+				nscss_len(doc, buf, hs, hu))
+				nscss_set(style, TABLESPACING_PROP, buf);
+			break;
+		case CSS_DISPLAY_TABLE_ROW:
+			nscss_set(style, TABLEPART_PROP, "row");
+			break;
+		case CSS_DISPLAY_TABLE_CELL:
+			nscss_set(style, TABLEPART_PROP, "cell");
+			break;
+		default:
+			break;
+		}
+	}
+
 	/* Inherited properties.  Under a parent, libcss leaves the ones no
 	 * rule set as inherit; at the bottom of the stack, compare with the
 	 * user agent sheet alone. */
@@ -2484,7 +2530,8 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		c != NSCSS_COLOR_MARK)
 		nscss_set(style, BGCOLOR_PROP, nscss_color(buf, c));
 
-	if (nscss_name_in(node, bg_image_tags)) {
+	/* (a block's box is a table cell too) */
+	if (nscss_name_in(node, bg_image_tags) || block) {
 		css_computed_background_image(st, &url);
 		if (url == NULL) {
 			nscss_set(style, BGIMAGE_PROP, "none");
@@ -2562,14 +2609,42 @@ nscss_export_box(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 	t = css_computed_height(st, &len, &unit);
 	nscss_box_len(doc, style, HEIGHT_PROP, t, CSS_HEIGHT_SET, len, unit,
 				  NSCSS_FIX_MARK_POS);
+	/* min- and max- sizes: layout clamps the box's size (none of them is
+	 * the initial value) */
+	len = 0;
+	t = css_computed_min_width(st, &len, &unit);
+	if (len > 0)
+		nscss_box_len(doc, style, MINWIDTH_PROP, t, CSS_MIN_WIDTH_SET, len,
+					  unit, NSCSS_FIX_MARK_POS);
+	t = css_computed_max_width(st, &len, &unit);
+	nscss_box_len(doc, style, MAXWIDTH_BOX_PROP, t, CSS_MAX_WIDTH_SET, len,
+				  unit, NSCSS_FIX_MARK_POS);
+	len = 0;
+	t = css_computed_min_height(st, &len, &unit);
+	if (len > 0)
+		nscss_box_len(doc, style, MINHEIGHT_PROP, t, CSS_MIN_HEIGHT_SET, len,
+					  unit, NSCSS_FIX_MARK_POS);
+	t = css_computed_max_height(st, &len, &unit);
+	nscss_box_len(doc, style, MAXHEIGHT_PROP, t, CSS_MAX_HEIGHT_SET, len,
+				  unit, NSCSS_FIX_MARK_POS);
 
 	/* Borders: layout draws a border by wrapping the element in a table,
-	 * all four sides alike.  Only a border on every side becomes one. */
+	 * each side its own width (none: 0), one style and one colour (the
+	 * first side's that has a border). */
 	{
 		css_fixed w[4];
 		css_unit wu[4];
-		uint8_t ws[4], bs[4];
-		int k;
+		uint8_t ws[4], bs[4], ct[4];
+		css_color cc[4];
+		int k, first = -1;
+		static const char *const bstyle[] = {
+			NULL, "none", "none", "dotted", "dashed", "solid", "double",
+			"groove", "ridge", "inset", "outset"
+		};
+		static char *const names[4] = {
+			BORDERTOPWIDTH_PROP, BORDERRIGHTWIDTH_PROP,
+			BORDERBOTTOMWIDTH_PROP, BORDERLEFTWIDTH_PROP
+		};
 
 		ws[0] = css_computed_border_top_width(st, &w[0], &wu[0]);
 		ws[1] = css_computed_border_right_width(st, &w[1], &wu[1]);
@@ -2579,25 +2654,31 @@ nscss_export_box(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		bs[1] = css_computed_border_right_style(st);
 		bs[2] = css_computed_border_bottom_style(st);
 		bs[3] = css_computed_border_left_style(st);
-		for (k = 0; k < 4; k++)
+		ct[0] = css_computed_border_top_color(st, &cc[0]);
+		ct[1] = css_computed_border_right_color(st, &cc[1]);
+		ct[2] = css_computed_border_bottom_color(st, &cc[2]);
+		ct[3] = css_computed_border_left_color(st, &cc[3]);
+		for (k = 0; k < 4; k++) {
 			if (ws[k] != CSS_BORDER_WIDTH_WIDTH ||
 				nscss_marked(w[k], wu[k], NSCSS_FIX_MARK_POS) || w[k] <= 0 ||
 				bs[k] == CSS_BORDER_STYLE_NONE || bs[k] == CSS_BORDER_STYLE_HIDDEN)
-				break;
-		if (k == 4) {
-			static const char *const bstyle[] = {
-				NULL, "none", "none", "dotted", "dashed", "solid", "double",
-				"groove", "ridge", "inset", "outset"
-			};
-			nscss_set(style, BORDERTOPWIDTH_PROP, nscss_len(doc, buf, w[0], wu[0]));
-			nscss_set(style, BORDERRIGHTWIDTH_PROP, nscss_len(doc, buf, w[1], wu[1]));
-			nscss_set(style, BORDERBOTTOMWIDTH_PROP, nscss_len(doc, buf, w[2], wu[2]));
-			nscss_set(style, BORDERLEFTWIDTH_PROP, nscss_len(doc, buf, w[3], wu[3]));
-			if (bs[0] < sizeof bstyle / sizeof bstyle[0])
-				nscss_set(style, BORDERSTYLE_PROP, bstyle[bs[0]]);
-			if (css_computed_border_top_color(st, &c) == CSS_BORDER_COLOR_COLOR &&
-				c != NSCSS_COLOR_MARK)
-				nscss_set(style, BORDERCOLOR_PROP, nscss_color(buf, c));
+				w[k] = 0;
+			else if (first < 0)
+				first = k;
+		}
+		if (first >= 0) {
+			for (k = 0; k < 4; k++)
+				nscss_set(style, names[k], w[k] > 0
+						  ? nscss_len(doc, buf, w[k], wu[k]) : "0px");
+			if (bs[first] < sizeof bstyle / sizeof bstyle[0])
+				nscss_set(style, BORDERSTYLE_PROP, bstyle[bs[first]]);
+			if (ct[first] == CSS_BORDER_COLOR_COLOR &&
+				cc[first] != NSCSS_COLOR_MARK)
+				nscss_set(style, BORDERCOLOR_PROP, nscss_color(buf, cc[first]));
+			else if (ct[first] == CSS_BORDER_COLOR_CURRENT_COLOR &&
+					 css_computed_color(st, &cc[first]) == CSS_COLOR_COLOR)
+				/* currentColor (the initial value): the text's */
+				nscss_set(style, BORDERCOLOR_PROP, nscss_color(buf, cc[first]));
 		}
 	}
 
@@ -2652,6 +2733,151 @@ nscss_encloses_floats(NSCSS_Node *node, const css_computed_style *st,
 	}
 }
 
+/* An attribute of NODE by its name, or NULL */
+static const char *
+nscss_attr_named(NSCSS_Node *node, const char *name, size_t len)
+{
+	int32 i;
+
+	for (i = 0; i < node->n_attrs; i++)
+		if (strlen(node->attrs[i].name) == len &&
+			!strncasecomp(node->attrs[i].name, name, len))
+			return node->attrs[i].value ? node->attrs[i].value : "";
+	return NULL;
+}
+
+/* The ::before or ::after (PS) of NODE: its text from 'content' (strings,
+ * attr(), quotes; no counters yet: layout replays tags in tables, which
+ * would count them twice) and the styles layout gives it, as PREFIX,
+ * PREFIX+"Color", "Bg", "Font" and "Block". */
+static void
+nscss_generated(NSCSS_Node *node, const css_computed_style *ps,
+				StyleStruct *style, char *prefix)
+{
+	const css_computed_content_item *it = NULL;
+	char text[1024], name[48], buf[48];
+	size_t n = 0, k;
+	css_color c;
+	uint8_t d;
+	int depth = 0;
+
+	if (!ps || css_computed_content(ps, &it) != CSS_CONTENT_SET || !it)
+		return;
+	d = css_computed_display_static(ps);
+	if (d == CSS_DISPLAY_NONE)
+		return;
+	for (; it->type != CSS_COMPUTED_CONTENT_NONE; it++) {
+		const char *add = NULL;
+		size_t len = 0;
+
+		switch (it->type) {
+		case CSS_COMPUTED_CONTENT_STRING:
+			add = lwc_string_data(it->data.string);
+			len = lwc_string_length(it->data.string);
+			break;
+		case CSS_COMPUTED_CONTENT_ATTR:
+			add = nscss_attr_named(node, lwc_string_data(it->data.attr),
+								   lwc_string_length(it->data.attr));
+			len = add ? strlen(add) : 0;
+			break;
+		case CSS_COMPUTED_CONTENT_OPEN_QUOTE:
+		case CSS_COMPUTED_CONTENT_CLOSE_QUOTE: {
+			/* the quotes property's pair (the first), or straight ones */
+			lwc_string **q = NULL;
+			int open = it->type == CSS_COMPUTED_CONTENT_OPEN_QUOTE;
+
+			css_computed_quotes(ps, &q);
+			if (q && q[0] && q[1]) {
+				add = lwc_string_data(q[open ? 0 : 1]);
+				len = lwc_string_length(q[open ? 0 : 1]);
+			} else {
+				add = "\"";
+				len = 1;
+			}
+			depth += open ? 1 : -1;
+			break;
+		}
+		default:
+			break;
+		}
+		for (k = 0; add && k < len && n < sizeof text - 1; k++)
+			text[n++] = add[k];
+	}
+	text[n] = '\0';
+	if (n == 0)
+		return;
+	nscss_set(style, prefix, text);
+	if (css_computed_color(ps, &c) == CSS_COLOR_COLOR && nscss_color(buf, c)) {
+		PR_snprintf(name, sizeof name, "%sColor", prefix);
+		nscss_set(style, name, buf);
+	}
+	if (css_computed_background_color(ps, &c) == CSS_BACKGROUND_COLOR_COLOR &&
+		c != NSCSS_COLOR_MARK && nscss_color(buf, c)) {
+		PR_snprintf(name, sizeof name, "%sBg", prefix);
+		nscss_set(style, name, buf);
+	}
+	buf[0] = '\0';
+	switch (css_computed_font_weight(ps)) {
+	case CSS_FONT_WEIGHT_BOLD: case CSS_FONT_WEIGHT_BOLDER:
+	case CSS_FONT_WEIGHT_600: case CSS_FONT_WEIGHT_700:
+	case CSS_FONT_WEIGHT_800: case CSS_FONT_WEIGHT_900:
+		XP_STRCAT(buf, "bold ");
+		break;
+	default:
+		break;
+	}
+	if (css_computed_font_style(ps) == CSS_FONT_STYLE_ITALIC ||
+		css_computed_font_style(ps) == CSS_FONT_STYLE_OBLIQUE)
+		XP_STRCAT(buf, "italic");
+	PR_snprintf(name, sizeof name, "%sFont", prefix);
+	nscss_set(style, name, buf[0] ? buf : "normal");
+	if (d == CSS_DISPLAY_BLOCK || d == CSS_DISPLAY_LIST_ITEM ||
+		d == CSS_DISPLAY_TABLE || d == CSS_DISPLAY_FLEX ||
+		d == CSS_DISPLAY_GRID) {
+		PR_snprintf(name, sizeof name, "%sBlock", prefix);
+		nscss_set(style, name, "1");
+	}
+	(void)depth;
+}
+
+/* An element's ::first-letter (PS, if a rule styles it) */
+static void
+nscss_first_letter(NSCSS_Doc *doc, const css_computed_style *ps,
+				   StyleStruct *style)
+{
+	char color[40] = "", bg[40] = "", font[40] = "", size[40] = "";
+	char out[200];
+	css_color c;
+	css_fixed len;
+	css_unit unit;
+
+	if (!ps)
+		return;
+	if (css_computed_color(ps, &c) == CSS_COLOR_COLOR && !nscss_color(color, c))
+		color[0] = '\0';
+	if (css_computed_background_color(ps, &c) == CSS_BACKGROUND_COLOR_COLOR &&
+		c != NSCSS_COLOR_MARK && !nscss_color(bg, c))
+		bg[0] = '\0';
+	switch (css_computed_font_weight(ps)) {
+	case CSS_FONT_WEIGHT_BOLD: case CSS_FONT_WEIGHT_BOLDER:
+	case CSS_FONT_WEIGHT_600: case CSS_FONT_WEIGHT_700:
+	case CSS_FONT_WEIGHT_800: case CSS_FONT_WEIGHT_900:
+		XP_STRCAT(font, "bold ");
+		break;
+	default:
+		XP_STRCAT(font, "normal ");
+		break;
+	}
+	if (css_computed_font_style(ps) == CSS_FONT_STYLE_ITALIC ||
+		css_computed_font_style(ps) == CSS_FONT_STYLE_OBLIQUE)
+		XP_STRCAT(font, "italic");
+	if (css_computed_font_size(ps, &len, &unit) == CSS_FONT_SIZE_DIMENSION &&
+		!nscss_len(doc, size, len, unit))
+		size[0] = '\0';
+	PR_snprintf(out, sizeof out, "%s|%s|%s|%s", color, bg, font, size);
+	nscss_set(style, FIRST_LETTER_PROP, out);
+}
+
 void
 NSCSS_StyleNode(NSCSS_Doc *doc, NSCSS_Node *node, StyleStruct *style)
 {
@@ -2681,6 +2907,17 @@ NSCSS_StyleNode(NSCSS_Doc *doc, NSCSS_Node *node, StyleStruct *style)
 				 ua ? ua->styles[CSS_PSEUDO_ELEMENT_NONE] : NULL, style);
 	nscss_encloses_floats(node, res->styles[CSS_PSEUDO_ELEMENT_NONE],
 						  res->styles[CSS_PSEUDO_ELEMENT_AFTER], style);
+	/* (not for replaced elements, nor hidden ones) */
+	if (res->styles[CSS_PSEUDO_ELEMENT_NONE] &&
+		css_computed_display_static(res->styles[CSS_PSEUDO_ELEMENT_NONE]) !=
+		CSS_DISPLAY_NONE && !nscss_name_in(node, nscss_replaced_tags)) {
+		nscss_generated(node, res->styles[CSS_PSEUDO_ELEMENT_BEFORE], style,
+						GEN_BEFORE_PROP);
+		nscss_generated(node, res->styles[CSS_PSEUDO_ELEMENT_AFTER], style,
+						GEN_AFTER_PROP);
+		nscss_first_letter(doc, res->styles[CSS_PSEUDO_ELEMENT_FIRST_LETTER],
+						   style);
+	}
 	if (ua)
 		css_select_results_destroy(ua);
 	css_select_results_destroy(res);

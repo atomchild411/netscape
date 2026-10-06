@@ -18,6 +18,7 @@
 
 
 #include "xp.h"
+#include <ctype.h>
 #include "pa_parse.h"
 #include "layout.h"
 #include "laylayer.h"
@@ -645,10 +646,141 @@ lo_CloseHeader(MWContext *context, lo_DocState *state)
 }
 
 static void
+lo_process_text_tag(MWContext *context, lo_DocState *state, PA_Tag *tag);
+
+/* Lay out LEN bytes of TEXT as a text tag of their own. */
+static void
+lo_text_piece(MWContext *context, lo_DocState *state, char *text, int32 len)
+{
+	PA_Tag piece;
+	char *tptr;
+
+	if (len <= 0)
+		return;
+	XP_MEMSET(&piece, 0, sizeof piece);
+	piece.type = P_TEXT;
+	piece.data = PA_ALLOC(len + 1);
+	if (!piece.data)
+		return;
+	PA_LOCK(tptr, char *, piece.data);
+	XP_BCOPY(text, tptr, len);
+	tptr[len] = '\0';
+	PA_UNLOCK(piece.data);
+	piece.data_len = piece.true_len = len;
+	lo_process_text_tag(context, state, &piece);
+	PA_FREE(piece.data);
+}
+
+/*
+ * The first text of an element with a ::first-letter style (pending in
+ * top_state->first_letter): its first letter, with the punctuation before
+ * it, in that style; the rest as it is.  TRUE if TAG was laid out so.
+ */
+static Bool
+lo_first_letter_text(MWContext *context, lo_DocState *state, PA_Tag *tag)
+{
+	char *spec = state->top_state->first_letter, *text, *parts[4], *p;
+	int32 len, i, j, k;
+	LO_TextAttr tmp_attr, *attr;
+
+	if (!spec || state->hide_content || tag->data_len <= 0 ||
+		(state->text_divert != P_UNKNOWN && state->text_divert != P_TEXT))
+		return FALSE;
+	PA_LOCK(text, char *, tag->data);
+	len = tag->data_len;
+	for (i = 0; i < len && XP_IS_SPACE(text[i]); i++)
+		;
+	if (i == len)
+	{
+		PA_UNLOCK(tag->data);
+		return FALSE;			/* white space only: the letter comes later */
+	}
+	state->top_state->first_letter = NULL;
+	state->top_state->first_letter_owner = NULL;
+	/* punctuation, then one letter (a UTF-8 sequence) */
+	for (j = i; j < len && ((unsigned char)text[j]) < 0x80 &&
+			 ispunct((unsigned char)text[j]); j++)
+		;
+	if (j < len)
+	{
+		j++;
+		while (j < len && (((unsigned char)text[j]) & 0xc0) == 0x80)
+			j++;
+	}
+	/* the copy: laying the pieces out may move the tag's text */
+	p = XP_ALLOC(len + 1);
+	if (!p)
+	{
+		PA_UNLOCK(tag->data);
+		XP_FREE(spec);
+		return FALSE;
+	}
+	XP_BCOPY(text, p, len);
+	p[len] = '\0';
+	PA_UNLOCK(tag->data);
+
+	lo_text_piece(context, state, p, i);
+	lo_FlushTextBlock(context, state);
+	if (state->font_stack)
+		lo_CopyTextAttr(state->font_stack->text_attr, &tmp_attr);
+	else
+		XP_MEMSET(&tmp_attr, 0, sizeof tmp_attr);
+	parts[0] = spec;
+	for (k = 1; k < 4; k++)
+	{
+		parts[k] = parts[k - 1] ? strchr(parts[k - 1], '|') : NULL;
+		if (parts[k])
+			*parts[k]++ = '\0';
+	}
+	if (parts[0] && *parts[0])
+		LO_ParseStyleSheetRGB(parts[0], &tmp_attr.fg.red, &tmp_attr.fg.green,
+							  &tmp_attr.fg.blue);
+	if (parts[1] && *parts[1])
+	{
+		LO_ParseStyleSheetRGB(parts[1], &tmp_attr.bg.red, &tmp_attr.bg.green,
+							  &tmp_attr.bg.blue);
+		tmp_attr.no_background = FALSE;
+	}
+	if (parts[2] && strstr(parts[2], "bold"))
+		tmp_attr.fontmask |= LO_FONT_BOLD;
+	else if (parts[2] && strstr(parts[2], "normal"))
+		tmp_attr.fontmask &= ~LO_FONT_BOLD;
+	if (parts[2] && strstr(parts[2], "italic"))
+		tmp_attr.fontmask |= LO_FONT_ITALIC;
+	if (parts[3] && *parts[3] && state->top_state->style_stack)
+	{
+		StyleStruct *ss = STYLESTACK_GetStyleByIndex(
+			state->top_state->style_stack, 0);
+		SS_Number *num = ss ? STYLESTRUCT_StringToSSNumber(ss, parts[3]) : NULL;
+
+		if (num)
+		{
+			LO_AdjustSSUnits(num, FONTSIZE_STYLE, context, state);
+			if (num->value > 0)
+				tmp_attr.point_size = num->value;
+			STYLESTRUCT_FreeSSNumber(ss, num);
+		}
+	}
+	attr = lo_FetchTextAttr(state, &tmp_attr);
+	lo_PushFont(state, P_UNKNOWN, attr);
+	lo_text_piece(context, state, p + i, j - i);
+	lo_FlushTextBlock(context, state);
+	attr = lo_PopFont(state, P_UNKNOWN);
+	lo_text_piece(context, state, p + j, len - j);
+	XP_FREE(p);
+	XP_FREE(spec);
+	return TRUE;
+}
+
+static void
 lo_process_text_tag(MWContext *context, lo_DocState *state, PA_Tag *tag)
 {
 	char *tptr;
 	char *tptr2;
+
+	if (state->top_state->first_letter &&
+		lo_first_letter_text(context, state, tag))
+		return;
 
 	/*
 	 * This is normal text, formatted or preformatted.
@@ -3489,6 +3621,22 @@ lo_flex_pads(MWContext *context, lo_DocState *state, StyleStruct *style_struct,
 	return sum;
 }
 
+/* A cell just begun (STATE, its sub-document) takes the font of the
+ * state around it (PREV), as the box code's cell does: a cell's text
+ * otherwise starts in the default font. */
+static void
+lo_cell_inherit_font(lo_DocState *prev, lo_DocState *state)
+{
+	LO_TextAttr tmp_attr, *attr;
+
+	if (!prev || !prev->font_stack || prev == state)
+		return;
+	lo_CopyTextAttr(prev->font_stack->text_attr, &tmp_attr);
+	attr = lo_FetchTextAttr(state, &tmp_attr);
+	attr->no_background = TRUE;	/* not the text background */
+	lo_PushFont(state, P_UNKNOWN, attr);
+}
+
 /*
  * A flex item (nscss's nsFlexItem: "grow shrink basis") in a flex table
  * (a flex container's, lo_SetStyleSheetBoxProperties): its own cell of the
@@ -3673,9 +3821,177 @@ lo_flex_item_begin(MWContext *context, lo_DocState *state,
 	XP_FREEIF(height_attr);
 	STYLESTRUCT_SetString(style_struct, STYLE_NEED_TO_POP_FLEX_ITEM, "1", 0);
 	if (state->sub_state)
+	{
+		lo_cell_inherit_font(state, state->sub_state);
 		state = state->sub_state;
+	}
 	lo_SetStyleSheetFontProperties(context, state, style_struct, tag, FALSE);
 	return state;
+}
+
+/* A CSS table row (display: table-row) in the CSS table being laid out:
+ * a row of its own (the open one ends).  TRUE if it began one. */
+static Bool
+lo_css_row_begin(MWContext *context, lo_DocState *state,
+				 StyleStruct *style_struct)
+{
+	lo_TableRec *table = state->current_table;
+	char *bgcolor, *valign;
+
+	if (!table)
+		return FALSE;
+	if (table->row_ptr && !table->row_ptr->row_done)
+		lo_EndTableRow(context, state, table);
+	bgcolor = STYLESTRUCT_GetString(style_struct, BG_COLOR_STYLE);
+	if (bgcolor && !strcasecomp(bgcolor, "transparent"))
+	{
+		XP_FREE(bgcolor);
+		bgcolor = NULL;
+	}
+	valign = STYLESTRUCT_GetString(style_struct, VERTICAL_ALIGN_STYLE);
+	lo_BeginTableRowAttributes(context, state, table, bgcolor, NULL,
+							   valign, NULL);
+	XP_FREEIF(bgcolor);
+	XP_FREEIF(valign);
+	STYLESTRUCT_SetString(style_struct, STYLE_NEED_TO_POP_ROW, "1", 0);
+	return TRUE;
+}
+
+/* A CSS table cell (display: table-cell) in the CSS table being laid out
+ * (in an anonymous row if no row is open): a cell of its own with the
+ * element's background, width and height; its padding stays its own (the
+ * box code, inside the cell).  The cell ends with the element (as a flex
+ * item's).  Returns the cell's state, or STATE if it is not in a table. */
+static lo_DocState *
+lo_css_cell_begin(MWContext *context, lo_DocState *state,
+				  StyleStruct *style_struct, PA_Tag *tag)
+{
+	lo_TableRec *table = state->current_table;
+	char *bgcolor, *valign, *width_attr = NULL, *height_attr = NULL;
+	SS_Number *num;
+	int32 pads;
+
+	if (!table || table->flex != LO_FLEX_NONE)
+		return state;
+	if (!table->row_ptr || table->row_ptr->row_done)
+		lo_BeginTableRowAttributes(context, state, table, NULL, NULL,
+								   NULL, NULL);
+	bgcolor = STYLESTRUCT_GetString(style_struct, BG_COLOR_STYLE);
+	if (bgcolor && !strcasecomp(bgcolor, "transparent"))
+	{
+		XP_FREE(bgcolor);
+		bgcolor = NULL;
+	}
+	/* (a cell's vertical-align: baseline, top, middle or bottom) */
+	valign = STYLESTRUCT_GetString(style_struct, VERTICAL_ALIGN_STYLE);
+	if (valign && strcasecomp(valign, "top") && strcasecomp(valign, "middle")
+		&& strcasecomp(valign, "bottom"))
+		StrAllocCopy(valign, "baseline");
+	num = STYLESTRUCT_GetNumber(style_struct, WIDTH_STYLE);
+	if (num && !(num->units && !strcasecomp(num->units, "%")))
+	{
+		LO_AdjustSSUnits(num, WIDTH_STYLE, context, state);
+		pads = lo_flex_pads(context, state, style_struct, FALSE);
+		if (num->value >= 0)
+			width_attr = PR_smprintf("%ld", (long)num->value + pads);
+	}
+	else if (num)
+		width_attr = PR_smprintf("%ld%%", (long)num->value);
+	STYLESTRUCT_FreeSSNumber(style_struct, num);
+	num = STYLESTRUCT_GetNumber(style_struct, HEIGHT_STYLE);
+	if (num && !(num->units && !strcasecomp(num->units, "%")))
+	{
+		LO_AdjustSSUnits(num, HEIGHT_STYLE, context, state);
+		pads = lo_flex_pads(context, state, style_struct, TRUE);
+		if (num->value > 0)
+			height_attr = PR_smprintf("%ld", (long)num->value + pads);
+	}
+	STYLESTRUCT_FreeSSNumber(style_struct, num);
+	if (lo_TableTrace())
+		fprintf(lo_TableTrace(), "css cell: bg %s valign %s w %s h %s\n",
+				bgcolor ? bgcolor : "-", valign ? valign : "-",
+				width_attr ? width_attr : "-", height_attr ? height_attr : "-");
+	lo_BeginTableCellAttributes(context, state, table, NULL, NULL, NULL,
+								bgcolor, NULL, LO_TILE_BOTH,
+								valign ? valign : "middle", NULL,
+								width_attr, height_attr, FALSE, TRUE);
+	/* CSS backgrounds are not inherited */
+	if (!bgcolor && table->current_subdoc &&
+		table->current_subdoc->backdrop.bg_color)
+	{
+		XP_DELETE(table->current_subdoc->backdrop.bg_color);
+		table->current_subdoc->backdrop.bg_color = NULL;
+	}
+	XP_FREEIF(bgcolor);
+	XP_FREEIF(valign);
+	XP_FREEIF(width_attr);
+	XP_FREEIF(height_attr);
+	STYLESTRUCT_SetString(style_struct, STYLE_NEED_TO_POP_FLEX_ITEM, "1", 0);
+	if (state->sub_state)
+	{
+		lo_cell_inherit_font(state, state->sub_state);
+		state = state->sub_state;
+	}
+	lo_SetStyleSheetFontProperties(context, state, style_struct, tag, FALSE);
+	return state;
+}
+
+/* A min- or max- size in pixels (a percentage of OF), or -1 if unset. */
+static int32
+lo_box_limit(MWContext *context, lo_DocState *state, StyleStruct *style_struct,
+			 char *name, int32 of)
+{
+	SS_Number *num = STYLESTRUCT_GetNumber(style_struct, name);
+	int32 v = -1;
+
+	if (!num)
+		return -1;
+	if (num->units && !strcasecomp(num->units, "%"))
+	{
+		if (of >= 0)
+			v = (int32)(num->value * of / 100);
+	}
+	else
+	{
+		LO_AdjustSSUnits(num, WIDTH_STYLE, context, state);
+		if (num->value >= 0)
+			v = (int32)num->value;
+	}
+	STYLESTRUCT_FreeSSNumber(style_struct, num);
+	return v;
+}
+
+/* A block's content width clamped by min-width and max-width (CSS 2.1
+ * 10.4): its width, or (none) the room it has, if a limit changes it.
+ * Returns the new width in a new SS_Number, or WIDTH as it was. */
+static SS_Number *
+lo_box_clamp_width(MWContext *context, lo_DocState *state,
+				   StyleStruct *style_struct, SS_Number *width, int32 room)
+{
+	int32 min_w, max_w, w;
+	char buf[32];
+
+	min_w = lo_box_limit(context, state, style_struct, MINWIDTH_STYLE, room);
+	max_w = lo_box_limit(context, state, style_struct, MAXWIDTH_STYLE, room);
+	if (min_w < 0 && max_w < 0)
+		return width;
+	if (width && !(width->units && !strcasecomp(width->units, "%")))
+		w = (int32)width->value;
+	else if (room > 0)
+		w = room;
+	else
+		return width;
+	if (max_w >= 0 && w > max_w)
+		w = max_w;
+	if (min_w >= 0 && w < min_w)
+		w = min_w;
+	if (width && w == (int32)width->value)
+		return width;
+	if (!width && w == room)
+		return width;
+	STYLESTRUCT_FreeSSNumber(style_struct, width);
+	PR_snprintf(buf, sizeof buf, "%ldpx", (long)w);
+	return STYLESTRUCT_StringToSSNumber(style_struct, buf);
 }
 
 PRIVATE
@@ -3704,6 +4020,8 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 	 * padding, height): its box as any block's, the flex table in it;
 	 * else the flex table is the box (flex_here) */
 	Bool flex_nested=FALSE, flex_here=FALSE;
+	/* a CSS table (display: table): the box's table is the table */
+	Bool css_table_here=FALSE;
 	char *box_bgcolor=NULL;
 	SS_Number *box_height=NULL;
 	int32 left_margin_offset=0, right_margin_offset=0;
@@ -3737,6 +4055,35 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 		is_flex_item = item_state != state;
 		state = item_state;
 	}
+#ifdef NS_LIBCSS
+	/* CSS tables: a row is a row of the table (and nothing more); a cell
+	 * is a cell, as a flex item is; a table is the box's table */
+	if(!is_table_relayout_begin_dummy_tag && !is_flex_item)
+	{
+		char *part = STYLESTRUCT_GetString(style_struct, TABLEPART_STYLE);
+
+		if(part && !strcmp(part, "row") &&
+		   lo_css_row_begin(context, state, style_struct))
+		{
+			XP_FREE(part);
+			return;
+		}
+		if(part && !strcmp(part, "cell"))
+		{
+			lo_DocState *cell_state = lo_css_cell_begin(context, state,
+														style_struct, tag);
+
+			if(cell_state != state)
+			{
+				is_flex_item = TRUE;	/* its cell has its background */
+				flex_stretched = TRUE;
+				state = cell_state;
+			}
+		}
+		css_table_here = part && !strcmp(part, "table");
+		XP_FREEIF(part);
+	}
+#endif
 
 	page_break_property = STYLESTRUCT_GetString(style_struct, PAGE_BREAK_BEFORE_STYLE);
 	if (page_break_property)
@@ -3832,6 +4179,20 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 
 	text_width = STYLESTRUCT_GetNumber(style_struct, WIDTH_STYLE);
 	LO_AdjustSSUnits(text_width, WIDTH_STYLE, context, state);
+	if(is_block)
+	{
+		/* min-width, max-width: of the room the block has (its
+		 * paddings come off it) */
+		int32 room = state->right_margin != 5000
+			? state->right_margin - state->left_margin : -1;
+
+		if(room > 0 && left_padding && left_padding->value > 0)
+			room -= (int32)left_padding->value;
+		if(room > 0 && right_padding && right_padding->value > 0)
+			room -= (int32)right_padding->value;
+		text_width = lo_box_clamp_width(context, state, style_struct,
+										text_width, room);
+	}
 
 	/* process bottom margin and padding in PopTag
 	 *    bottom_margin = STYLESTRUCT_GetNumber(style_struct, BOTTOMMARGIN_STYLE);
@@ -3879,10 +4240,9 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 	 * body's background is the document's). */
 	if(is_block)
 		flex_value = STYLESTRUCT_GetString(style_struct, FLEX_STYLE);
-	/* (not a P: a paragraph is closed by the next one from under its
-	 * style, and closing a box table there replays tags that change the
-	 * style stack under LO_PopStyleTagByIndex) */
-	if(is_block && tag->type != P_BODY && tag->type != P_PARAGRAPH
+	/* (a paragraph's box is closed before the block that ends it starts:
+	 * LO_ImplicitPop) */
+	if(is_block && tag->type != P_BODY
 	   && !(is_flex_item && flex_stretched))
 	{
 		box_bgcolor = STYLESTRUCT_GetString(style_struct, BG_COLOR_STYLE);
@@ -3899,6 +4259,27 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 			box_height = NULL;
 		}
 		LO_AdjustSSUnits(box_height, HEIGHT_STYLE, context, state);
+		{
+			/* max-height, then min-height (a table's height is its
+			 * least: min-height alone is a height) */
+			int32 min_h = lo_box_limit(context, state, style_struct,
+									   MINHEIGHT_STYLE, -1);
+			int32 max_h = lo_box_limit(context, state, style_struct,
+									   MAXHEIGHT_STYLE, -1);
+			int32 h = box_height ? (int32)box_height->value : -1;
+			char hbuf[32];
+
+			if(max_h >= 0 && h > max_h)
+				h = max_h;
+			if(min_h > 0 && h < min_h)
+				h = min_h;
+			if(h != (box_height ? (int32)box_height->value : -1))
+			{
+				STYLESTRUCT_FreeSSNumber(style_struct, box_height);
+				PR_snprintf(hbuf, sizeof hbuf, "%ldpx", (long)h);
+				box_height = STYLESTRUCT_StringToSSNumber(style_struct, hbuf);
+			}
+		}
 		if(box_height && box_height->value <= 0)
 		{
 			STYLESTRUCT_FreeSSNumber(style_struct, box_height);
@@ -3916,6 +4297,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
            || box_bgcolor
            || box_height
            || flex_value
+           || css_table_here
 		   || (borderwidth_value && borderwidth_value->value > 0)
 		   || (bordertopwidth_value && bordertopwidth_value->value > 0)
 		   || (borderbottomwidth_value && borderbottomwidth_value->value > 0)
@@ -4146,6 +4528,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
         char *leftpad_attr=NULL;
         char *rightpad_attr=NULL;
         char *cellspace_attr="0"; /* the box is the cell: no spacing */
+        char *css_spacing_attr=NULL;
         char *cols_attr=NULL;
 
 		/* begin table row attributes */
@@ -4172,7 +4555,8 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 		 */
         /* (a block's box is as wide as it can be; a float's, or a flex
          * item's (its cell is its width), fits its content) */
-        if(text_width || (state->right_margin != 5000
+        /* (a CSS table is as wide as its width, or its content) */
+        if(text_width || (state->right_margin != 5000 && !css_table_here
                           && (right_margin || left_margin
                               || (!align_value && !is_flex_item))))
 		{
@@ -4203,16 +4587,16 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 			width_attr = PR_smprintf("%ld", table_width);
 		}
 
-		if(left_padding && !flex_here)
+		if(left_padding && !flex_here && !css_table_here)
 			leftpad_attr = PR_smprintf("%ld", (int32)left_padding->value);
-		if(right_padding && !flex_here)
+		if(right_padding && !flex_here && !css_table_here)
 			rightpad_attr = PR_smprintf("%ld", (int32)right_padding->value);
 
 		/* top and bottom padding values */
 		top_padding    = STYLESTRUCT_GetNumber(style_struct, TOPPADDING_STYLE);
 	    LO_AdjustSSUnits(top_padding, TOPPADDING_STYLE, context, state);
 
-		if(top_padding && !flex_here)
+		if(top_padding && !flex_here && !css_table_here)
 		{
 			toppad_attr = PR_smprintf("%ld", (int32)top_padding->value);
 			STYLESTRUCT_FreeSSNumber(style_struct, top_padding);
@@ -4221,7 +4605,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 		bottom_padding    = STYLESTRUCT_GetNumber(style_struct, BOTTOMPADDING_STYLE);
 	    LO_AdjustSSUnits(bottom_padding, BOTTOMPADDING_STYLE, context, state);
 		
-		if(bottom_padding && !flex_here)
+		if(bottom_padding && !flex_here && !css_table_here)
 		{
 			bottompad_attr = PR_smprintf("%ld", (int32)bottom_padding->value);
 			STYLESTRUCT_FreeSSNumber(style_struct, bottom_padding);
@@ -4270,6 +4654,19 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 			height_attr = PR_smprintf("%ld", h);
 		}
 
+		/* a CSS table's cells are border-spacing apart */
+		if(css_table_here)
+		{
+			SS_Number *sp = STYLESTRUCT_GetNumber(style_struct,
+												  TABLESPACING_STYLE);
+
+			LO_AdjustSSUnits(sp, WIDTH_STYLE, context, state);
+			if(sp && sp->value > 0)
+				css_spacing_attr = PR_smprintf("%ld", (long)sp->value);
+			STYLESTRUCT_FreeSSNumber(style_struct, sp);
+			if(css_spacing_attr)
+				cellspace_attr = css_spacing_attr;
+		}
 		if(lo_TableTrace())
 			fprintf(lo_TableTrace(), "box: width %s height %s border %s cellpad %s cellspace %s pads %s/%s/%s/%s",
 					  width_attr ? width_attr : "-", height_attr ? height_attr : "-",
@@ -4306,6 +4703,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 
 		XP_FREEIF(width_attr);
 		XP_FREEIF(height_attr);
+		XP_FREEIF(css_spacing_attr);
 
 		if(state->sub_state)
 			state = state->sub_state;
@@ -4340,8 +4738,10 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 				XP_FREEIF(ai);
 			}
 
-			/* begin a table row */
-			lo_BeginTableRowAttributes(context,
+			/* begin a table row (a CSS table's come from its rows and
+			 * cells) */
+			if(!css_table_here)
+				lo_BeginTableRowAttributes(context,
                             			state,
                             			state->current_table,
                             			NULL, /* the cell paints it */
@@ -4355,8 +4755,21 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 				state = state->sub_state;
 
 			/* a flex container's cells are its items' */
-			if(state->current_table->row_ptr && !flex_here)
+			if(state->current_table->row_ptr && !flex_here &&
+			   !css_table_here)
 			{
+				/* background-repeat: the backdrop's tiling */
+				lo_TileMode tile = LO_TILE_BOTH;
+				char *repeat = STYLESTRUCT_GetString(style_struct,
+													 BG_REPEAT_STYLE);
+
+				if(repeat && !strcasecomp(repeat, "repeat-x"))
+					tile = LO_TILE_HORIZ;
+				else if(repeat && !strcasecomp(repeat, "repeat-y"))
+					tile = LO_TILE_VERT;
+				else if(repeat && !strcasecomp(repeat, "no-repeat"))
+					tile = LO_NO_TILE;
+				XP_FREEIF(repeat);
 				/* now begin the table data */
 				lo_BeginTableCellAttributes(context,
                             				state,
@@ -4366,7 +4779,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
                             				nowrap_attr,
                             				bgcolor_attr, /* the box's background, to its edges */
                                             cell_bgimage_attr, /* Backdrop URL */
-                                            LO_TILE_BOTH, /* Backdrop tiling mode */
+                                            tile, /* Backdrop tiling mode */
                             				cell_valign_attr,
                             				cell_halign_attr,
                             				cell_width_attr,
@@ -4510,6 +4923,99 @@ lo_SetStyleSheetRandomProperties(MWContext *context,
 }
 
 
+/*
+ * An element's ::before (AFTER FALSE) or ::after text (nscss's nsBefore,
+ * nsAfter): laid out as text there, in the pseudo-element's colour,
+ * background and font, on a line of its own if it is a block.  Once: the
+ * property is emptied.
+ */
+void
+lo_GeneratedContent(MWContext *context, lo_DocState *state,
+					StyleStruct *style_struct, Bool after)
+{
+	char *prefix = after ? GEN_AFTER_STYLE : GEN_BEFORE_STYLE;
+	char name[48], *text, *v, *tptr;
+	LO_TextAttr tmp_attr, *attr;
+	Bool block;
+	PA_Tag tag;
+	int32 len;
+
+	if(!style_struct || !state || state->hide_content)
+		return;
+	text = STYLESTRUCT_GetString(style_struct, prefix);
+	if(!text)
+		return;
+	STYLESTRUCT_SetString(style_struct, prefix, "", MAX_STYLESTRUCT_PRIORITY);
+	len = XP_STRLEN(text);
+	if(len == 0)
+	{
+		XP_FREE(text);
+		return;
+	}
+	PR_snprintf(name, sizeof name, "%sBlock", prefix);
+	v = STYLESTRUCT_GetString(style_struct, name);
+	block = v != NULL;
+	XP_FREEIF(v);
+	if(block)
+		lo_SetSoftLineBreakState(context, state, FALSE, 1);
+
+	lo_FlushTextBlock(context, state);
+	if(state->font_stack)
+		lo_CopyTextAttr(state->font_stack->text_attr, &tmp_attr);
+	else
+		XP_MEMSET(&tmp_attr, 0, sizeof tmp_attr);
+	PR_snprintf(name, sizeof name, "%sColor", prefix);
+	if((v = STYLESTRUCT_GetString(style_struct, name)) != NULL)
+	{
+		LO_ParseStyleSheetRGB(v, &tmp_attr.fg.red, &tmp_attr.fg.green,
+							  &tmp_attr.fg.blue);
+		XP_FREE(v);
+	}
+	PR_snprintf(name, sizeof name, "%sBg", prefix);
+	if((v = STYLESTRUCT_GetString(style_struct, name)) != NULL)
+	{
+		LO_ParseStyleSheetRGB(v, &tmp_attr.bg.red, &tmp_attr.bg.green,
+							  &tmp_attr.bg.blue);
+		tmp_attr.no_background = FALSE;
+		XP_FREE(v);
+	}
+	PR_snprintf(name, sizeof name, "%sFont", prefix);
+	if((v = STYLESTRUCT_GetString(style_struct, name)) != NULL)
+	{
+		if(strstr(v, "bold"))
+			tmp_attr.fontmask |= LO_FONT_BOLD;
+		else
+			tmp_attr.fontmask &= ~LO_FONT_BOLD;
+		if(strstr(v, "italic"))
+			tmp_attr.fontmask |= LO_FONT_ITALIC;
+		else
+			tmp_attr.fontmask &= ~LO_FONT_ITALIC;
+		XP_FREE(v);
+	}
+	attr = lo_FetchTextAttr(state, &tmp_attr);
+	lo_PushFont(state, P_UNKNOWN, attr);
+
+	XP_MEMSET(&tag, 0, sizeof tag);
+	tag.type = P_TEXT;
+	tag.data = PA_ALLOC(len + 1);
+	if(tag.data)
+	{
+		PA_LOCK(tptr, char *, tag.data);
+		XP_BCOPY(text, tptr, len);
+		tptr[len] = '\0';
+		PA_UNLOCK(tag.data);
+		tag.data_len = len;
+		tag.true_len = len;
+		lo_process_text_tag(context, state, &tag);
+		lo_FlushTextBlock(context, state);
+		PA_FREE(tag.data);
+	}
+	XP_FREE(text);
+	attr = lo_PopFont(state, P_UNKNOWN);
+	if(block)
+		lo_SetSoftLineBreakState(context, state, FALSE, 1);
+}
+
 PRIVATE
 void
 lo_SetStyleSheetProperties(MWContext *context, 
@@ -4617,6 +5123,22 @@ lo_SetStyleSheetProperties(MWContext *context,
 
 	lo_SetStyleSheetRandomProperties(context, state, style_struct, tag);
 
+#ifdef NS_LIBCSS
+	/* ::first-letter: the next text's first letter (the ::before text's
+	 * included) */
+	{
+		char *fl = STYLESTRUCT_GetString(style_struct, FIRST_LETTER_STYLE);
+
+		if(fl)
+		{
+			XP_FREEIF(state->top_state->first_letter);
+			state->top_state->first_letter = fl;
+			state->top_state->first_letter_owner = style_struct;
+		}
+	}
+	/* ::before, in the element's box */
+	lo_GeneratedContent(context, state, style_struct, FALSE);
+#endif
 }
 
 /* return TRUE if the tag type is an empty tag. (not a container tag)

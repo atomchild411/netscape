@@ -961,6 +961,11 @@ struct lo_TopState_struct {
     PRPackedBool wedged_on_mocha;
 	Bool in_cell_relayout;
 	int16 table_nesting_level;	/* Counter to keep track of depth of nesting within tables */
+	/* ::first-letter of the element that started last (nscss's
+	 * nsFirstLetter*): its styles, until text comes (laytags.c), and the
+	 * element's style, which ends it */
+	char *first_letter;
+	void *first_letter_owner;
 #ifdef DEBUG_ScriptPlugin
 	char * mimetype;
 #endif 
@@ -1028,6 +1033,9 @@ extern int32 lo_cssgrid_heights(lo_TableRec *table, int32 n, lo_TableCell **cell
 extern Bool lo_ChangeText ( LO_TextBlock * block, char * text );
 extern void lo_FlushLineBuffer(MWContext *, lo_DocState *);
 extern void lo_FlushTextBlock ( MWContext *context, lo_DocState *state );
+/* laytags.c: an element's ::before (AFTER FALSE) or ::after text */
+extern void lo_GeneratedContent(MWContext *context, lo_DocState *state,
+								StyleStruct *style_struct, Bool after);
 extern void lo_ResetFontStack(MWContext *, lo_DocState *);
 extern void lo_ChangeBodyTextFGColor(MWContext *context, lo_DocState *state, LO_Color *color);
 extern void lo_PushFont(lo_DocState *, intn, LO_TextAttr *);

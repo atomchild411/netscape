@@ -681,12 +681,64 @@ LO_PushTagOnStyleStack(MWContext *context, lo_DocState *state, PA_Tag *tag)
 	return(rv);
 }
 
+#ifdef NS_LIBCSS
+/* The tags that end an open paragraph (their layout calls
+ * lo_CloseParagraph). */
+static XP_Bool
+lo_closes_paragraph(TagType type)
+{
+	switch(type)
+	{
+	case P_PARAGRAPH: case P_DIVISION: case P_HEADER_1: case P_HEADER_2:
+	case P_HEADER_3: case P_HEADER_4: case P_HEADER_5: case P_HEADER_6:
+	case P_UNUM_LIST: case P_NUM_LIST: case P_DESC_LIST: case P_MENU:
+	case P_DIRECTORY: case P_TABLE: case P_PREFORMAT: case P_BLOCKQUOTE:
+	case P_HRULE: case P_ADDRESS: case P_CENTER: case P_FORM:
+	case P_DESC_TITLE: case P_DESC_TEXT: case P_LISTING_TEXT:
+	case P_PLAIN_TEXT: case P_LIST_ITEM:
+		return TRUE;
+	default:
+		return FALSE;
+	}
+}
+#endif
+
 /* look for implicit tag pops.  For instance the close of a TR tag
  * implicitly pops all TD tags and any other open tags
  */
 PUBLIC XP_Bool
 LO_ImplicitPop(MWContext *context, lo_DocState **state, PA_Tag *tag)
 {
+#ifdef NS_LIBCSS
+	/* A block starting in an open paragraph that has a box (a table of
+	 * its own): close the paragraph now, while its style is the top one.
+	 * lo_CloseParagraph would pop it from under the new tag's style (it
+	 * runs once that is pushed), and closing the box there replays tags
+	 * that change the stack under it.  The paragraph's end then finds no
+	 * paragraph style left to pop. */
+	if(!tag->is_end && lo_closes_paragraph(tag->type) && *state &&
+	   (*state)->in_paragraph && (*state)->top_state &&
+	   (*state)->top_state->style_stack)
+	{
+		StyleAndTagStack *stack = (*state)->top_state->style_stack;
+		TagStruct *top = STYLESTACK_GetTagByIndex(stack, 0);
+		StyleStruct *st = STYLESTACK_GetStyleByIndex(stack, 0);
+
+		if(top && top->name && !strcasecomp(top->name, "p") && st)
+		{
+			SS_Number *pt = STYLESTRUCT_GetNumber(st, STYLE_NEED_TO_POP_TABLE);
+
+			if(pt && pt->value > 0)
+			{
+				STYLESTRUCT_FreeSSNumber(st, pt);
+				LO_PopStyleTagByIndex(context, state, P_PARAGRAPH, 0);
+			}
+			else
+				STYLESTRUCT_FreeSSNumber(st, pt);
+		}
+	}
+#endif
+
 
 	switch(tag->type) 
 	{
@@ -823,6 +875,15 @@ LO_PopStyleTagByIndex(MWContext *context, lo_DocState **state,
 	}
 
 #ifdef NS_LIBCSS
+	/* ::after, in the element's box (before it closes) */
+	lo_GeneratedContent(context, *state, top_style, TRUE);
+	/* a ::first-letter that found no text ends with its element */
+	if((*state)->top_state->first_letter_owner == (void *)top_style)
+	{
+		XP_FREEIF((*state)->top_state->first_letter);
+		(*state)->top_state->first_letter_owner = NULL;
+	}
+
 	/* the element encloses the floats that started inside it: end below
 	 * them (before any wrapper table closes, whose cell they are in) */
 	if((property = STYLESTRUCT_GetString(top_style, NS_FLOAT_MARK_STYLE)) != NULL)
@@ -943,6 +1004,21 @@ LO_PopStyleTagByIndex(MWContext *context, lo_DocState **state,
 			top_state = lo_FetchTopState(XP_DOCID(context));
 			*state = lo_TopSubState(top_state);
 		}
+	}
+
+	/* the end of a CSS table row (its cells have ended) */
+	if((property = STYLESTRUCT_GetString(top_style,
+										 STYLE_NEED_TO_POP_ROW)) != NULL)
+	{
+		XP_Bool pop = !strcmp(property, "1");
+
+		STYLESTRUCT_SetString(top_style, STYLE_NEED_TO_POP_ROW, "0",
+							  MAX_STYLESTRUCT_PRIORITY);
+		XP_FREE(property);
+		if(pop && (*state)->current_table &&
+		   (*state)->current_table->row_ptr &&
+		   !(*state)->current_table->row_ptr->row_done)
+			lo_EndTableRow(context, *state, (*state)->current_table);
 	}
 
 	property = STYLESTRUCT_GetString(top_style, STYLE_NEED_TO_POP_ALIGNMENT);

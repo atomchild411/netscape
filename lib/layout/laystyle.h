@@ -103,6 +103,10 @@ extern XP_Bool LO_IsStyledUnknownTag(lo_DocState *state, PA_Tag *tag, XP_Bool *i
 #define WIDTH_STYLE			"width"
 #define LAYER_WIDTH_STYLE               "_layer_width" /* Bogus style used for layer widths */
 #define HEIGHT_STYLE			"height"
+#define MINWIDTH_STYLE			"nsMinWidth"	/* nscss: min- and max- sizes */
+#define MAXWIDTH_STYLE			"nsMaxWidth"
+#define MINHEIGHT_STYLE			"nsMinHeight"
+#define MAXHEIGHT_STYLE			"nsMaxHeight"
 #define BLOCKBOX_STYLE			"nsBlockBox"	/* nscss: a block-level box */
 /* nscss: flexbox (a flex table, laytable.c) */
 #define FLEX_STYLE				"nsFlex"
@@ -125,6 +129,16 @@ extern XP_Bool LO_IsStyledUnknownTag(lo_DocState *state, PA_Tag *tag, XP_Bool *i
 #define GRIDITEM_STYLE			"nsGridItem"
 #define GRIDJUSTIFYSELF_STYLE	"nsGridJustifySelf"
 #define STYLE_NEED_TO_POP_FLEX_ITEM	"nsNeedToPopFlexItem"
+/* nscss: CSS tables (display: table, table-row, table-cell) */
+#define TABLEPART_STYLE			"nsTable"
+#define TABLESPACING_STYLE		"nsTableSpacing"
+#define STYLE_NEED_TO_POP_ROW	"nsNeedToPopRow"
+/* nscss: generated content (::before, ::after): the text, and with
+ * "Color", "Bg", "Font", "Block" after the name its styles */
+#define GEN_BEFORE_STYLE		"nsBefore"
+#define GEN_AFTER_STYLE			"nsAfter"
+/* nscss: ::first-letter, as "color|background|font|size" */
+#define FIRST_LETTER_STYLE		"nsFirstLetter"
 
 #define HORIZONTAL_ALIGN_STYLE	"align"   /* css float property */
 #define CLEAR_STYLE				"clear"
