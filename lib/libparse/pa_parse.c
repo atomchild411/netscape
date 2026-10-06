@@ -868,6 +868,33 @@ PA_ParseBlock(NET_StreamClass *stream, const char *block, int block_len)
     len = (int32)block_len;	
 
     /*
+     * A byte order mark at the start of the document is not text: as
+     * UTF-8 (EF BB BF), or as the three Latin-1 characters it reads as
+     * when the document was taken for Latin-1 (here in UTF-8).
+     */
+    {
+	static MWContext *bom_window = NULL;
+	static int32 bom_doc = -1;
+
+	if (!doc_data->is_inline_stream &&
+	    (doc_data->window_id != bom_window || doc_data->doc_id != bom_doc))
+	{
+	    bom_window = doc_data->window_id;
+	    bom_doc = doc_data->doc_id;
+	    if (len >= 3 && !XP_MEMCMP(buf, "\357\273\277", 3))
+	    {
+		buf += 3;
+		len -= 3;
+	    }
+	    else if (len >= 6 && !XP_MEMCMP(buf, "\303\257\302\273\302\277", 6))
+	    {
+		buf += 6;
+		len -= 6;
+	    }
+	}
+    }
+
+    /*
      * Parse this unique MDL document.  Get per-document state info.
      */
 
