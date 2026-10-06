@@ -475,19 +475,17 @@ ifdef NS_QUICKJS
 DEFINES		+= -DNS_QUICKJS
 endif
 
-# Page text drawn with FreeType (cmd/xfe/ftfonts.c): with pkgsrc's X and
-# Motif, which bring FreeType along; not yet for the IRIX Motif build.
-ifndef NS_IRIX_MOTIF
+# Page text drawn with FreeType (cmd/xfe/ftfonts.c); the IRIX Motif build
+# links it in.
 NS_FREETYPE	= 1
-endif
 ifdef NS_FREETYPE
 DEFINES		+= -DNS_FREETYPE
 endif
 
 # zlib, libpng and libjpeg (libjpeg-turbo) from pkgsrc, not the tree's
-# 1996-1998 copies (modules/zlib, modules/libimg/png, jpeg): with pkgsrc's
-# X and Motif; not yet for the IRIX Motif build.
-ifndef NS_IRIX_MOTIF
+# 1996-1998 copies (modules/zlib, modules/libimg/png, jpeg), which
+# NS_TREE_IMGLIBS=1 still builds.
+ifndef NS_TREE_IMGLIBS
 NS_SYSTEM_IMGLIBS = 1
 endif
 ifdef NS_SYSTEM_IMGLIBS
@@ -502,9 +500,7 @@ endif
 ifdef NS_OPENSSL
 DEFINES		+= -DNS_OPENSSL
 # HTTP/2 by nghttp2 (network/main/mkh2.c), over TLS only
-ifndef NS_IRIX_MOTIF
 NS_HTTP2	= 1
-endif
 ifdef NS_HTTP2
 DEFINES		+= -DNS_HTTP2
 endif

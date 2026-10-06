@@ -8,8 +8,14 @@ code the source release left out.  Browser only: no mail, news or editor.
 
 Run:     /usr/local/bin/netscape5 [URL]
 Needs:   IRIX 6.5.22 or later, X11 and IRIX's Motif (x_eoe, motif_eoe);
-         any MIPS CPU.  Nothing else: OpenSSL and the C++ runtime are linked
-         into the program.
+         any MIPS CPU.  Nothing else: every library it uses besides IRIX's
+         is linked into the program.
+Fonts:   page text is drawn by FreeType in Arimo, Tinos and Cousine (the
+         Chrome OS core fonts, metric-compatible with Arial, Times New
+         Roman and Courier New), with DejaVu Sans for what they lack:
+         /usr/local/lib/netscape5/fonts (NS_FONT_DIR names another).
+HTTP/2:  used with servers that offer it (over TLS); NS_HTTP2=0 turns it
+         off.
 Trusts:  the Mozilla root certificates in /usr/local/lib/netscape5/cacert.pem
          (also OpenSSL's default store, SSL_CERT_FILE and SSL_CERT_DIR).
 X class: Netscape5 (so it keeps clear of Netscape 4's app-defaults/Netscape).
@@ -25,5 +31,9 @@ Licenses: licenses/ -- the Netscape Public License 1.0 for Navigator;
 OpenSSL (Apache License 2.0) and LLVM's libc++ (Apache License 2.0 with
 LLVM exception) are linked in, as are QuickJS (JavaScript), NetSurf's
 libcss, libdom, libhubbub, libparserutils and libwapcaplet (style sheets
-and the DOM), all MIT licence, and nanosvg (SVG images, zlib licence);
-cacert.pem is from Mozilla (MPL 2.0).
+and the DOM), all MIT licence, nanosvg (SVG images, zlib licence),
+libpng (PNG Reference Library licence), libjpeg-turbo (IJG, BSD and zlib
+licences), zlib, bzip2 (BSD-style), FreeType (FreeType License), libwebp
+(BSD, with Google's patent grant) and nghttp2 (HTTP/2, MIT licence).
+The fonts: croscorefonts (Apache License 2.0) and DejaVu (Bitstream Vera
+licence, and public domain changes).  cacert.pem is from Mozilla (MPL 2.0).

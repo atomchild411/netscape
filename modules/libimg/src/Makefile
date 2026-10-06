@@ -46,9 +46,9 @@ EXPORTS		= PIMGCB.h PPSIMGCB.h
 
 REQUIRES	= zlib nspr jpeg util img png xpcom
 
-# the tree's libpng and zlib only for the IRIX Motif build (config.mk's
+# the tree's libpng and zlib only with NS_TREE_IMGLIBS (config.mk's
 # NS_SYSTEM_IMGLIBS is not known yet here)
-ifdef NS_IRIX_MOTIF
+ifdef NS_TREE_IMGLIBS
 LOCAL_INCLUDES	= -I../png -I. -I$(DEPTH)/dist/public/zlib
 else
 LOCAL_INCLUDES	= -I.
@@ -85,9 +85,9 @@ EXPORTS		= PIMGCB.h PPSIMGCB.h
 
 REQUIRES	= jtools java zlib nspr dbm jpeg util img png layer js xpcom
 
-# the tree's libpng and zlib only for the IRIX Motif build (config.mk's
+# the tree's libpng and zlib only with NS_TREE_IMGLIBS (config.mk's
 # NS_SYSTEM_IMGLIBS is not known yet here)
-ifdef NS_IRIX_MOTIF
+ifdef NS_TREE_IMGLIBS
 LOCAL_INCLUDES	= -I../png -I. -I$(DEPTH)/dist/public/zlib
 else
 LOCAL_INCLUDES	= -I.

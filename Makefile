@@ -27,9 +27,9 @@ DIRS_JS		= js
 endif
 endif
 
-# the tree's libjpeg: only for the IRIX Motif build (config.mk:
+# the tree's libjpeg: only with NS_TREE_IMGLIBS (config.mk:
 # NS_SYSTEM_IMGLIBS, not known yet here)
-ifdef NS_IRIX_MOTIF
+ifdef NS_TREE_IMGLIBS
 DIRS_JPEG	= jpeg
 endif
 

@@ -17,8 +17,8 @@
 
 DEPTH		= ../..
 
-# the tree's libpng: only for the IRIX Motif build (NS_SYSTEM_IMGLIBS)
-ifdef NS_IRIX_MOTIF
+# the tree's libpng: only with NS_TREE_IMGLIBS (NS_SYSTEM_IMGLIBS)
+ifdef NS_TREE_IMGLIBS
 DIRS_PNG = png
 endif
 

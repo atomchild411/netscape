@@ -709,6 +709,18 @@ endif
 ifdef NS_QUICKJS
 OTHER_LIBS	:= -Wl,-Bstatic -lquickjs -ldom -lhubbub -lparserutils -lwapcaplet -Wl,-Bdynamic $(OTHER_LIBS)
 endif
+ifdef NS_HTTP2
+OTHER_LIBS	:= -Wl,-Bstatic -lnghttp2 -Wl,-Bdynamic $(OTHER_LIBS)
+endif
+ifdef NS_WEBP
+OTHER_LIBS	:= -Wl,-Bstatic -lwebp -lsharpyuv -Wl,-Bdynamic $(OTHER_LIBS)
+endif
+ifdef NS_FREETYPE
+OTHER_LIBS	:= -Wl,-Bstatic -lfreetype -lbz2 -Wl,-Bdynamic $(OTHER_LIBS)
+endif
+ifdef NS_SYSTEM_IMGLIBS
+OTHER_LIBS	:= -Wl,-Bstatic -lpng16 -ljpeg -lz -Wl,-Bdynamic $(OTHER_LIBS)
+endif
 else
 # pkgsrc's Motif and X libraries: SGI's libSgm extends IRIX's own Motif only.
 OTHER_LIBS	= -lXm -lXmu -lXt -lX11 -lXext -lgen -laudio -lm -lpthread $(OS_LIBS)
