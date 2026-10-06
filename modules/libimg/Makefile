@@ -17,10 +17,15 @@
 
 DEPTH		= ../..
 
+# the tree's libpng: only for the IRIX Motif build (NS_SYSTEM_IMGLIBS)
+ifdef NS_IRIX_MOTIF
+DIRS_PNG = png
+endif
+
 ifdef STANDALONE_IMAGE_LIB
-DIRS = png public src
+DIRS = $(DIRS_PNG) public src
 else
-DIRS = png classes public src
+DIRS = $(DIRS_PNG) classes public src
 endif
 
 EXTRA_LIBS	= libzlib.a libpng.a

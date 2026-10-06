@@ -63,6 +63,18 @@ MICROLINE_LIB	= $(DIST)/lib/libXmL.a
 
 include $(DEPTH)/config/config.mk
 
+# the tree's image and compression libraries, or pkgsrc's (OTHER_LIBS)
+ifdef NS_SYSTEM_IMGLIBS
+DIST_PNG	=
+DIST_JPEG	=
+DIST_ZLIB	=
+else
+DIST_PNG	= $(DIST)/lib/libpng.a
+DIST_JPEG	= $(DIST)/lib/libjpeg.a
+DIST_ZLIB	= $(DIST)/lib/libzlib.a
+endif
+
+
 DIRS		= \
 		  $(XFE2_DIR) \
 		  $(HPUX_XMU_EXTRA_DIRS) \
@@ -265,7 +277,7 @@ BASIC_LIBS	= \
 		  $(DIST)/lib/lib$(LITE_PREFIX)rdf.a \
 		  $(DIST)/lib/lib$(LITE_PREFIX)xml.a \
 		  $(DIST)/lib/lib$(LITE_PREFIX)lay.a \
-		  $(DIST)/lib/libpng.a \
+		  $(DIST_PNG) \
 		  $(DIST)/lib/libmariner.a \
 		  $(DIST)/lib/libimg.a \
 		  $(NULL)
@@ -284,9 +296,9 @@ JAVA_JMC = $(DIST)/lib/libjmc.a      # XXX To be removed...
 endif
 
 BASIC_LIBS	+= \
-		  $(DIST)/lib/libpng.a \
+		  $(DIST_PNG) \
 		  $(JAVA_JMC) \
-		  $(DIST)/lib/libjpeg.a \
+		  $(DIST_JPEG) \
 		  $(DIST)/lib/libhook.a \
 		  $(DIST)/lib/libparse.a \
 		  $(DIST)/lib/lib$(LITE_PREFIX)pref.a \
@@ -445,7 +457,7 @@ BASIC_LIBS	+= \
 
 endif  # JAVA_OR_OJI
 
-BASIC_LIBS	+= $(DIST)/lib/libzlib.a
+BASIC_LIBS	+= $(DIST_ZLIB)
 
 ifndef NO_MOCHA
 ifdef NS_QUICKJS
@@ -714,6 +726,9 @@ OTHER_LIBS	:= -lwebp $(OTHER_LIBS)
 endif
 ifdef NS_FREETYPE
 OTHER_LIBS	:= -lfreetype $(OTHER_LIBS)
+endif
+ifdef NS_SYSTEM_IMGLIBS
+OTHER_LIBS	:= -lpng16 -ljpeg -lz $(OTHER_LIBS)
 endif
 endif
 else

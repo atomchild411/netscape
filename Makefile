@@ -27,7 +27,13 @@ DIRS_JS		= js
 endif
 endif
 
-DIRS		= config coreconf $(NSPRDIR) jpeg dbm xpcom network
+# the tree's libjpeg: only for the IRIX Motif build (config.mk:
+# NS_SYSTEM_IMGLIBS, not known yet here)
+ifdef NS_IRIX_MOTIF
+DIRS_JPEG	= jpeg
+endif
+
+DIRS		= config coreconf $(NSPRDIR) $(DIRS_JPEG) dbm xpcom network
 
 ifdef MOZ_NETCAST
 DIRS		+= netcast

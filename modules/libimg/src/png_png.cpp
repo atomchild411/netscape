@@ -18,6 +18,9 @@
 
 /* png_png.c - modified from example.c code */
 
+/* the tree's 1997 libpng; with the system's (NS_SYSTEM_IMGLIBS): ipng16.cpp */
+#ifndef NS_SYSTEM_IMGLIBS
+
 #include "if.h"
 
 #include "png.h"
@@ -210,5 +213,4 @@ void end_callback(png_structp png_ptr, png_infop info)
         il_flush_image_data((il_container *)png_ptr->io_ptr);
 }
 
-
-
+#endif /* !NS_SYSTEM_IMGLIBS */

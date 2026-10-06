@@ -40,7 +40,16 @@
 #endif
 
 PR_BEGIN_EXTERN_C
+#ifdef NS_SYSTEM_IMGLIBS
+/* libjpeg-turbo installs only the public headers: what jinclude.h gave */
+#include <stdio.h>
+#include <string.h>
+#ifndef SIZEOF
+#define SIZEOF(object)	((size_t) sizeof(object))
+#endif
+#else
 #include "jinclude.h"
+#endif
 #include "jpeglib.h"
 #include "jerror.h"
 

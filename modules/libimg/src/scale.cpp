@@ -426,13 +426,15 @@ il_alpha_mask(
     {
         while (output_bits_remaining) {
             n += mask_len;
-            not_transparent = (*src != 0);
+            /* the pixel's alpha, RGBA as above (this read the red byte
+             * and stepped one byte: enlarged images lost their shape) */
+            not_transparent = (*(src+3) > 0x60 );
 
-            while (n >= src_len) {
+            while (n >= src_len && output_bits_remaining) {
                 SHIFT_IMAGE_MASK(not_transparent);
                 n -= src_len;
             }
-            src++;
+            src += 4;
         }
 
     }

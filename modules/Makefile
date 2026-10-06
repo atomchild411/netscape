@@ -31,10 +31,13 @@ DIRS		= \
 	rdf \
 	xml \
 	schedulr \
-    zlib \
     li \
     progress \
 	$(NULL)
+
+ifndef NS_SYSTEM_IMGLIBS
+DIRS	+= zlib
+endif
 
 ifndef MOZ_SECURITY
 DIRS +=	security

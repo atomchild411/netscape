@@ -18,6 +18,9 @@
 
 #include "png.h"
 
+/* the tree's 1997 libpng; with the system's (NS_SYSTEM_IMGLIBS): ipng16.cpp */
+#ifndef NS_SYSTEM_IMGLIBS
+
 #include "if.h"
 #include "ipng.h"
 #define OK 1
@@ -254,3 +257,4 @@ void il_png_abort(il_container *ic)
 	return;
 }
 
+#endif /* !NS_SYSTEM_IMGLIBS */

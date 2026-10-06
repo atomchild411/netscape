@@ -19,10 +19,30 @@
 #include "if.h"
 #include "il.h"
 
+#ifdef NS_SYSTEM_IMGLIBS
+/* libjpeg-turbo installs only the public headers: what jinclude.h gave */
+#include <stdio.h>
+#include <string.h>
+#ifndef SIZEOF
+#define SIZEOF(object)	((size_t) sizeof(object))
+#endif
+#else
 #include "jinclude.h"
+#endif
 #include "jpeglib.h"
 #include "jerror.h"
+#ifndef NS_SYSTEM_IMGLIBS
 #include "jpegint.h"
+#else
+/* (from jpegint.h and older jmorecfg.h) */
+#ifndef RIGHT_SHIFT
+#define SHIFT_TEMPS
+#define RIGHT_SHIFT(x, shft)	((x) >> (shft))
+#endif
+#ifndef GETJSAMPLE
+#define GETJSAMPLE(value)	((int) (value))
+#endif
+#endif
 
 
 /* BEGIN code adapted from jpeg library */

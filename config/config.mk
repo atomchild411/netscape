@@ -484,6 +484,16 @@ ifdef NS_FREETYPE
 DEFINES		+= -DNS_FREETYPE
 endif
 
+# zlib, libpng and libjpeg (libjpeg-turbo) from pkgsrc, not the tree's
+# 1996-1998 copies (modules/zlib, modules/libimg/png, jpeg): with pkgsrc's
+# X and Motif; not yet for the IRIX Motif build.
+ifndef NS_IRIX_MOTIF
+NS_SYSTEM_IMGLIBS = 1
+endif
+ifdef NS_SYSTEM_IMGLIBS
+DEFINES		+= -DNS_SYSTEM_IMGLIBS
+endif
+
 # WebP images by libwebp (modules/libimg/src/ibuf.cpp)
 ifdef NS_WEBP
 DEFINES		+= -DNS_WEBP
