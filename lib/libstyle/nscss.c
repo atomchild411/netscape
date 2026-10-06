@@ -69,6 +69,15 @@
 #define IMGHEIGHT_PROP			"nsImageHeight"
 #define HEIGHT_PROP				"height"
 #define BLOCKBOX_PROP			"nsBlockBox"	/* a block-level box */
+/* Flexbox, for layout's flex tables: the container's direction, its
+ * justify-content, align-items and column gap; an item's "grow shrink
+ * basis" and its align-self. */
+#define FLEX_PROP				"nsFlex"
+#define FLEXJUSTIFY_PROP		"nsFlexJustify"
+#define FLEXALIGN_PROP			"nsFlexAlign"
+#define FLEXGAP_PROP			"nsFlexGap"
+#define FLEXITEM_PROP			"nsFlexItem"
+#define FLEXALIGNSELF_PROP		"nsFlexAlignSelf"
 #define BORDERTOPWIDTH_PROP		"borderTopWidth"
 #define BORDERRIGHTWIDTH_PROP	"borderRightWidth"
 #define BORDERBOTTOMWIDTH_PROP	"borderBottomWidth"
@@ -144,7 +153,12 @@ struct NSCSS_Node {
 	css_stylesheet	*inline_style;
 	void			*node_data;	/* libcss's */
 	XP_Bool			 flex_row;	/* lays its children out in a row */
+	uint8_t			 flex;		/* a flex container: NSCSS_FLEX_* */
 };
+
+#define NSCSS_FLEX_NONE		0
+#define NSCSS_FLEX_ROW		1	/* layout's flex table (laytable.c) */
+#define NSCSS_FLEX_COLUMN	2	/* blocks one below the other */
 
 static css_select_handler nscss_handler;
 
@@ -1974,6 +1988,68 @@ nscss_layout_block(const char *n)
 	return FALSE;
 }
 
+static void
+nscss_export_flex_container(NSCSS_Doc *doc, const css_computed_style *st,
+							StyleStruct *style)
+{
+	char buf[64];
+	css_fixed len;
+	css_unit unit;
+
+	nscss_set(style, FLEX_PROP,
+			  css_computed_flex_direction(st) == CSS_FLEX_DIRECTION_ROW_REVERSE ?
+			  "row-reverse" : "row");
+	switch (css_computed_justify_content(st)) {
+	case CSS_JUSTIFY_CONTENT_FLEX_END: nscss_set(style, FLEXJUSTIFY_PROP, "end"); break;
+	case CSS_JUSTIFY_CONTENT_CENTER: nscss_set(style, FLEXJUSTIFY_PROP, "center"); break;
+	case CSS_JUSTIFY_CONTENT_SPACE_BETWEEN: nscss_set(style, FLEXJUSTIFY_PROP, "space-between"); break;
+	case CSS_JUSTIFY_CONTENT_SPACE_AROUND: nscss_set(style, FLEXJUSTIFY_PROP, "space-around"); break;
+	case CSS_JUSTIFY_CONTENT_SPACE_EVENLY: nscss_set(style, FLEXJUSTIFY_PROP, "space-evenly"); break;
+	default: break;				/* start */
+	}
+	switch (css_computed_align_items(st)) {
+	case CSS_ALIGN_ITEMS_FLEX_START: nscss_set(style, FLEXALIGN_PROP, "start"); break;
+	case CSS_ALIGN_ITEMS_FLEX_END: nscss_set(style, FLEXALIGN_PROP, "end"); break;
+	case CSS_ALIGN_ITEMS_CENTER: nscss_set(style, FLEXALIGN_PROP, "center"); break;
+	case CSS_ALIGN_ITEMS_BASELINE: nscss_set(style, FLEXALIGN_PROP, "baseline"); break;
+	default: break;				/* stretch */
+	}
+	if (css_computed_column_gap(st, &len, &unit) == CSS_COLUMN_GAP_SET &&
+		len > 0 && unit != CSS_UNIT_PCT)
+		nscss_set(style, FLEXGAP_PROP, nscss_len(doc, buf, len, unit));
+}
+
+static void
+nscss_export_flex_item(NSCSS_Doc *doc, const css_computed_style *st,
+					   StyleStruct *style)
+{
+	char buf[96], basis[48];
+	css_fixed grow = 0, shrink = INTTOFIX(1), len;
+	css_unit unit;
+	uint8_t b;
+
+	css_computed_flex_grow(st, &grow);
+	css_computed_flex_shrink(st, &shrink);
+	b = css_computed_flex_basis(st, &len, &unit);
+	if (b == CSS_FLEX_BASIS_SET && unit != CSS_UNIT_PCT)
+		nscss_len(doc, basis, len, unit);
+	else if (b == CSS_FLEX_BASIS_SET && unit == CSS_UNIT_PCT)
+		PR_snprintf(basis, sizeof basis, "%g%%", FIXTOFLT(len));
+	else
+		XP_STRCPY(basis, b == CSS_FLEX_BASIS_CONTENT ? "content" : "auto");
+	PR_snprintf(buf, sizeof buf, "%g %g %s", FIXTOFLT(grow), FIXTOFLT(shrink),
+				basis);
+	nscss_set(style, FLEXITEM_PROP, buf);
+	switch (css_computed_align_self(st)) {
+	case CSS_ALIGN_SELF_STRETCH: nscss_set(style, FLEXALIGNSELF_PROP, "stretch"); break;
+	case CSS_ALIGN_SELF_FLEX_START: nscss_set(style, FLEXALIGNSELF_PROP, "start"); break;
+	case CSS_ALIGN_SELF_FLEX_END: nscss_set(style, FLEXALIGNSELF_PROP, "end"); break;
+	case CSS_ALIGN_SELF_CENTER: nscss_set(style, FLEXALIGNSELF_PROP, "center"); break;
+	case CSS_ALIGN_SELF_BASELINE: nscss_set(style, FLEXALIGNSELF_PROP, "baseline"); break;
+	default: break;				/* auto: the container's */
+	}
+}
+
 /* replaced elements: sized by the style sheet even inline */
 static const char *const nscss_replaced_tags[] = {
 	"img", "object", "embed", "video", "canvas", "iframe", NULL
@@ -2010,10 +2086,32 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		nscss_set(style, DISPLAY_PROP, "none");
 		return;					/* layout applies nothing else */
 	}
-	/* Layout has no flex or grid layout.  A row of flex items, or a grid's
-	 * items, flow side by side as inline content does: closer than a
-	 * column of blocks (a navigation bar laid out as a list). */
-	if (t == CSS_DISPLAY_FLEX || t == CSS_DISPLAY_INLINE_FLEX) {
+	/* A flex container's children are its items: blocks (CSS
+	 * "blockifies" them), in a row in layout's flex table, or one below
+	 * the other (a column). */
+	if (node->parent && node->parent->flex != NSCSS_FLEX_NONE &&
+		css_computed_position(st) != CSS_POSITION_ABSOLUTE &&
+		css_computed_position(st) != CSS_POSITION_FIXED) {
+		if (node->parent->flex == NSCSS_FLEX_ROW)
+			nscss_export_flex_item(doc, st, style);
+		nscss_set(style, DISPLAY_PROP, "block");
+		block = TRUE;
+		t = CSS_DISPLAY_BLOCK;
+	}
+	if (t == CSS_DISPLAY_FLEX) {
+		uint8_t fd = css_computed_flex_direction(st);
+
+		node->flex = (fd == CSS_FLEX_DIRECTION_COLUMN ||
+					  fd == CSS_FLEX_DIRECTION_COLUMN_REVERSE) ?
+			NSCSS_FLEX_COLUMN : NSCSS_FLEX_ROW;
+		if (node->flex == NSCSS_FLEX_ROW)
+			nscss_export_flex_container(doc, st, style);
+	}
+	/* Layout has no grid layout, nor inline flex.  A grid's items, or an
+	 * inline flex container's, flow side by side as inline content does:
+	 * closer than a column of blocks (a navigation bar laid out as a
+	 * list). */
+	if (t == CSS_DISPLAY_INLINE_FLEX) {
 		uint8_t fd = css_computed_flex_direction(st);
 		node->flex_row = fd == CSS_FLEX_DIRECTION_ROW ||
 						 fd == CSS_FLEX_DIRECTION_ROW_REVERSE ||
@@ -2025,6 +2123,7 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		node->flex_row = TRUE;
 	}
 	if ((node->parent && node->parent->flex_row &&
+		 node->parent->flex == NSCSS_FLEX_NONE &&
 		 !nscss_layout_block(lwc_string_data(node->name))) ||
 		/* floated list items: a menu bar, laid out as a flex row would
 		 * be (layout floats only images and tables) */

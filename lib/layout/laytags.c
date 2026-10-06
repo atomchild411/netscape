@@ -3366,6 +3366,203 @@ lo_get_border_width(MWContext *context, lo_DocState *state, StyleStruct *style_s
 	return(width);
 }
 
+/* A flex container's table (FLEX: nscss's nsFlex): CSS flexbox's row. */
+static void
+lo_flex_container_begin(MWContext *context, lo_DocState *state,
+						StyleStruct *style_struct, lo_TableRec *table,
+						char *flex)
+{
+	char *v;
+	SS_Number *gap;
+
+	table->flex = !strcmp(flex, "row-reverse") ? LO_FLEX_ROW_REVERSE
+											   : LO_FLEX_ROW;
+	table->flex_justify = LO_FLEX_JUSTIFY_START;
+	if ((v = STYLESTRUCT_GetString(style_struct, FLEXJUSTIFY_STYLE)) != NULL)
+	{
+		if (!strcmp(v, "end"))
+			table->flex_justify = LO_FLEX_JUSTIFY_END;
+		else if (!strcmp(v, "center"))
+			table->flex_justify = LO_FLEX_JUSTIFY_CENTER;
+		else if (!strcmp(v, "space-between"))
+			table->flex_justify = LO_FLEX_JUSTIFY_BETWEEN;
+		else if (!strcmp(v, "space-around"))
+			table->flex_justify = LO_FLEX_JUSTIFY_AROUND;
+		else if (!strcmp(v, "space-evenly"))
+			table->flex_justify = LO_FLEX_JUSTIFY_EVENLY;
+		XP_FREE(v);
+	}
+	table->flex_stretch = TRUE;
+	if ((v = STYLESTRUCT_GetString(style_struct, FLEXALIGN_STYLE)) != NULL)
+	{
+		table->flex_stretch = FALSE;	/* start, center, end, baseline */
+		XP_FREE(v);
+	}
+	table->flex_gap = 0;
+	gap = STYLESTRUCT_GetNumber(style_struct, FLEXGAP_STYLE);
+	LO_AdjustSSUnits(gap, WIDTH_STYLE, context, state);
+	if (gap && gap->value > 0)
+		table->flex_gap = (int32)gap->value;
+	STYLESTRUCT_FreeSSNumber(style_struct, gap);
+}
+
+/* The flex table inside a flex container's box (in its cell, STATE): as
+ * wide as the box's content, as high as its height; its row aligned by
+ * align-items.  The style's table pop closes both (STYLE_NEED_TO_POP_TABLE
+ * "2"). */
+static lo_DocState *
+lo_flex_nested_begin(MWContext *context, lo_DocState *state,
+					 StyleStruct *style_struct, char *flex,
+					 SS_Number *height)
+{
+	char *width_attr, *height_attr = NULL, *valign, *ai;
+
+	width_attr = PR_smprintf("%ld", (long)(state->right_margin - state->left_margin));
+	if(height)
+		height_attr = PR_smprintf("%ld", (long)height->value);
+	lo_BeginTableAttributes(context, state, NULL, "0", NULL, NULL, NULL, NULL,
+							NULL, NULL, NULL, NULL, NULL, NULL, width_attr,
+							height_attr, "0", NULL, NULL, NULL, NULL, "0",
+							NULL);
+	XP_FREEIF(width_attr);
+	XP_FREEIF(height_attr);
+	if(state->sub_state)
+		state = state->sub_state;
+	if(!state->current_table)
+		return state;
+	lo_flex_container_begin(context, state, style_struct,
+							state->current_table, flex);
+	valign = "TOP";
+	ai = STYLESTRUCT_GetString(style_struct, FLEXALIGN_STYLE);
+	if(ai && !strcmp(ai, "center"))
+		valign = "MIDDLE";
+	else if(ai && !strcmp(ai, "end"))
+		valign = "BOTTOM";
+	else if(ai && !strcmp(ai, "baseline"))
+		valign = "BASELINE";
+	lo_BeginTableRowAttributes(context, state, state->current_table, NULL,
+							   NULL, valign, NULL);
+	XP_FREEIF(ai);
+	if(state->sub_state)
+		state = state->sub_state;
+	STYLESTRUCT_SetString(style_struct, STYLE_NEED_TO_POP_TABLE, "2", 0);
+	return state;
+}
+
+/*
+ * A flex item (nscss's nsFlexItem: "grow shrink basis") in a flex table
+ * (a flex container's, lo_SetStyleSheetBoxProperties): its own cell of the
+ * row, which takes its background (filling the row's height, as an item
+ * stretches) and its height; its padding stays its own (margins within the
+ * cell).  Returns the cell's state, or STATE if it is not an item.
+ */
+static lo_DocState *
+lo_flex_item_begin(MWContext *context, lo_DocState *state,
+				   StyleStruct *style_struct, PA_Tag *tag, Bool *stretched)
+{
+	char *item = STYLESTRUCT_GetString(style_struct, FLEXITEM_STYLE);
+	lo_TableRec *table = state->current_table;
+	double grow = 0, shrink = 1;
+	char basis[64], *valign = NULL, *self, *bgcolor;
+	char *height_attr = NULL;
+	int32 basis_px = -1;
+	SS_Number *num;
+
+	if (!item)
+		return state;
+	if (!table || table->flex == LO_FLEX_NONE || !table->row_ptr ||
+		table->row_ptr->row_done)
+	{
+		XP_FREE(item);
+		return state;
+	}
+	basis[0] = '\0';
+	sscanf(item, "%lf %lf %63s", &grow, &shrink, basis);
+	XP_FREE(item);
+	if (basis[0] && strcmp(basis, "auto") && strcmp(basis, "content") &&
+		!strchr(basis, '%'))
+	{
+		num = STYLESTRUCT_StringToSSNumber(style_struct, basis);
+		LO_AdjustSSUnits(num, WIDTH_STYLE, context, state);
+		if (num && num->value >= 0)
+			basis_px = (int32)num->value;
+		STYLESTRUCT_FreeSSNumber(style_struct, num);
+	}
+	if (basis_px < 0 && (!basis[0] || !strcmp(basis, "auto")))
+	{
+		/* auto: the item's width, if it has one */
+		num = STYLESTRUCT_GetNumber(style_struct, WIDTH_STYLE);
+		if (num && !(num->units && !strcasecomp(num->units, "%")))
+		{
+			LO_AdjustSSUnits(num, WIDTH_STYLE, context, state);
+			if (num->value >= 0)
+				basis_px = (int32)num->value;
+		}
+		STYLESTRUCT_FreeSSNumber(style_struct, num);
+	}
+	if (basis_px >= 0)
+	{
+		/* the cell's width: with the item's padding */
+		num = STYLESTRUCT_GetNumber(style_struct, LEFTPADDING_STYLE);
+		LO_AdjustSSUnits(num, LEFTPADDING_STYLE, context, state);
+		if (num && num->value > 0)
+			basis_px += (int32)num->value;
+		STYLESTRUCT_FreeSSNumber(style_struct, num);
+		num = STYLESTRUCT_GetNumber(style_struct, RIGHTPADDING_STYLE);
+		LO_AdjustSSUnits(num, RIGHTPADDING_STYLE, context, state);
+		if (num && num->value > 0)
+			basis_px += (int32)num->value;
+		STYLESTRUCT_FreeSSNumber(style_struct, num);
+	}
+	table->flex_next_grow = grow;
+	table->flex_next_shrink = shrink;
+	table->flex_next_basis = basis_px;
+
+	/* align-self; without it, the row's (the container's align-items) */
+	*stretched = table->flex_stretch;
+	self = STYLESTRUCT_GetString(style_struct, FLEXALIGNSELF_STYLE);
+	if (self)
+	{
+		valign = "top";
+		*stretched = !strcmp(self, "stretch");
+		if (!strcmp(self, "center"))
+			valign = "middle";
+		else if (!strcmp(self, "end"))
+			valign = "bottom";
+		else if (!strcmp(self, "baseline"))
+			valign = "baseline";
+		XP_FREE(self);
+	}
+	/* a stretched item's background fills the row's height: the cell's;
+	 * another's is its own box in the cell (as high as its content) */
+	bgcolor = *stretched ? STYLESTRUCT_GetString(style_struct, BG_COLOR_STYLE)
+						 : NULL;
+	if (bgcolor && !strcasecomp(bgcolor, "transparent"))
+	{
+		XP_FREE(bgcolor);
+		bgcolor = NULL;
+	}
+	num = STYLESTRUCT_GetNumber(style_struct, HEIGHT_STYLE);
+	if (num && !(num->units && !strcasecomp(num->units, "%")))
+	{
+		LO_AdjustSSUnits(num, HEIGHT_STYLE, context, state);
+		if (num->value > 0)
+			height_attr = PR_smprintf("%ld", (long)num->value);
+	}
+	STYLESTRUCT_FreeSSNumber(style_struct, num);
+
+	lo_BeginTableCellAttributes(context, state, table, NULL, NULL, NULL,
+								bgcolor, NULL, LO_TILE_BOTH, valign, NULL,
+								NULL, height_attr, FALSE, TRUE);
+	XP_FREEIF(bgcolor);
+	XP_FREEIF(height_attr);
+	STYLESTRUCT_SetString(style_struct, STYLE_NEED_TO_POP_FLEX_ITEM, "1", 0);
+	if (state->sub_state)
+		state = state->sub_state;
+	lo_SetStyleSheetFontProperties(context, state, style_struct, tag, FALSE);
+	return state;
+}
+
 PRIVATE
 void
 lo_SetStyleSheetBoxProperties(MWContext *context,
@@ -3386,6 +3583,12 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 	char *display_prop, *align_property, *page_break_property;
 	Bool use_table_for_box=FALSE;
 	Bool is_block=FALSE;
+	Bool is_flex_item=FALSE, flex_stretched=TRUE;
+	char *flex_value=NULL;
+	/* a flex container with something to draw (background, border,
+	 * padding, height): its box as any block's, the flex table in it;
+	 * else the flex table is the box (flex_here) */
+	Bool flex_nested=FALSE, flex_here=FALSE;
 	char *box_bgcolor=NULL;
 	SS_Number *box_height=NULL;
 	int32 left_margin_offset=0, right_margin_offset=0;
@@ -3408,6 +3611,16 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 		if(LO_IsStyledUnknownTag(state, tag, &unknown_void))
 			is_table_relayout_begin_dummy_tag = FALSE;
 #endif
+	}
+
+	if(!is_table_relayout_begin_dummy_tag)
+	{
+		lo_DocState *item_state = lo_flex_item_begin(context, state,
+													 style_struct, tag,
+													 &flex_stretched);
+
+		is_flex_item = item_state != state;
+		state = item_state;
 	}
 
 	page_break_property = STYLESTRUCT_GetString(style_struct, PAGE_BREAK_BEFORE_STYLE);
@@ -3549,7 +3762,9 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 
 	/* A block's background colour and height need its box as well (the
 	 * body's background is the document's). */
-	if(is_block && tag->type != P_BODY)
+	if(is_block)
+		flex_value = STYLESTRUCT_GetString(style_struct, FLEX_STYLE);
+	if(is_block && tag->type != P_BODY && !(is_flex_item && flex_stretched))
 	{
 		box_bgcolor = STYLESTRUCT_GetString(style_struct, BG_COLOR_STYLE);
 		if(box_bgcolor && !strcasecomp(box_bgcolor, "transparent"))
@@ -3581,6 +3796,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
            || bgimage_value
            || box_bgcolor
            || box_height
+           || flex_value
 		   || (borderwidth_value && borderwidth_value->value > 0)
 		   || (bordertopwidth_value && bordertopwidth_value->value > 0)
 		   || (borderbottomwidth_value && borderbottomwidth_value->value > 0)
@@ -3610,6 +3826,19 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 			right_margin_offset += (int32)right_padding->value;
 	}
 
+
+	if(flex_value)
+	{
+		flex_nested = box_bgcolor || box_height
+			|| (borderwidth_value && borderwidth_value->value > 0)
+			|| (bordertopwidth_value && bordertopwidth_value->value > 0)
+			|| (borderbottomwidth_value && borderbottomwidth_value->value > 0)
+			|| (borderleftwidth_value && borderleftwidth_value->value > 0)
+			|| (borderrightwidth_value && borderrightwidth_value->value > 0)
+			|| (left_padding && left_padding->value > 0)
+			|| (right_padding && right_padding->value > 0);
+		flex_here = !flex_nested;
+	}
 
 	if(left_margin_offset || right_margin_offset || (text_width && !use_table_for_box))
 	{
@@ -3822,10 +4051,11 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
          * if right_margin == 5000 then the margin is really unknown and we cant
          * do correct margin calculations
 		 */
-        /* (a block's box is as wide as it can be; a float's fits its
-         * content) */
+        /* (a block's box is as wide as it can be; a float's, or a flex
+         * item's (its cell is its width), fits its content) */
         if(text_width || (state->right_margin != 5000
-                          && (right_margin || left_margin || !align_value)))
+                          && (right_margin || left_margin
+                              || (!align_value && !is_flex_item))))
 		{
 			int32 table_width = state->right_margin - state->left_margin;
 			
@@ -3854,16 +4084,16 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 			width_attr = PR_smprintf("%ld", table_width);
 		}
 
-		if(left_padding)
+		if(left_padding && !flex_here)
 			leftpad_attr = PR_smprintf("%ld", (int32)left_padding->value);
-		if(right_padding)
+		if(right_padding && !flex_here)
 			rightpad_attr = PR_smprintf("%ld", (int32)right_padding->value);
 
 		/* top and bottom padding values */
 		top_padding    = STYLESTRUCT_GetNumber(style_struct, TOPPADDING_STYLE);
 	    LO_AdjustSSUnits(top_padding, TOPPADDING_STYLE, context, state);
 
-		if(top_padding)
+		if(top_padding && !flex_here)
 		{
 			toppad_attr = PR_smprintf("%ld", (int32)top_padding->value);
 			STYLESTRUCT_FreeSSNumber(style_struct, top_padding);
@@ -3872,7 +4102,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 		bottom_padding    = STYLESTRUCT_GetNumber(style_struct, BOTTOMPADDING_STYLE);
 	    LO_AdjustSSUnits(bottom_padding, BOTTOMPADDING_STYLE, context, state);
 		
-		if(bottom_padding)
+		if(bottom_padding && !flex_here)
 		{
 			bottompad_attr = PR_smprintf("%ld", (int32)bottom_padding->value);
 			STYLESTRUCT_FreeSSNumber(style_struct, bottom_padding);
@@ -3967,11 +4197,27 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 			 * no cell border of its own (laytable.c's TABLE_BORDERS_GONE) */
 			if(state->current_table->draw_borders > 0)
 				state->current_table->draw_borders = -1;
+			if(flex_here)
+				lo_flex_container_begin(context, state, style_struct,
+										state->current_table, flex_value);
 
 			/* change the vertical alignment to top so that top and bottom 
 			 * margins work correctly.  "Center" seems to be the default
 			 */
 			row_valign_attr = strdup("TOP");
+			if(flex_here)
+			{
+				/* align-items, for the items without align-self */
+				char *ai = STYLESTRUCT_GetString(style_struct, FLEXALIGN_STYLE);
+
+				if(ai && !strcmp(ai, "center"))
+					StrAllocCopy(row_valign_attr, "MIDDLE");
+				else if(ai && !strcmp(ai, "end"))
+					StrAllocCopy(row_valign_attr, "BOTTOM");
+				else if(ai && !strcmp(ai, "baseline"))
+					StrAllocCopy(row_valign_attr, "BASELINE");
+				XP_FREEIF(ai);
+			}
 
 			/* begin a table row */
 			lo_BeginTableRowAttributes(context,
@@ -3987,7 +4233,8 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 			if(state->sub_state)
 				state = state->sub_state;
 
-			if(state->current_table->row_ptr)
+			/* a flex container's cells are its items' */
+			if(state->current_table->row_ptr && !flex_here)
 			{
 				/* now begin the table data */
 				lo_BeginTableCellAttributes(context,
@@ -4035,6 +4282,9 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 		/* after starting a table we must reset all the font properties */
         lo_SetStyleSheetFontProperties(context, state, style_struct, tag, FALSE);
 
+		if(flex_nested)
+			state = lo_flex_nested_begin(context, state, style_struct,
+										 flex_value, box_height);
 	}
 
 	/* add text indent to the current X position */
@@ -4046,6 +4296,7 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 	XP_FREEIF(border_style_value);
 	XP_FREEIF(border_color_value);
 	XP_FREEIF(box_bgcolor);
+	XP_FREEIF(flex_value);
 	STYLESTRUCT_FreeSSNumber(style_struct, box_height);
 	STYLESTRUCT_FreeSSNumber(style_struct, borderwidth_value);
 	

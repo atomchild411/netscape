@@ -104,6 +104,14 @@ extern XP_Bool LO_IsStyledUnknownTag(lo_DocState *state, PA_Tag *tag, XP_Bool *i
 #define LAYER_WIDTH_STYLE               "_layer_width" /* Bogus style used for layer widths */
 #define HEIGHT_STYLE			"height"
 #define BLOCKBOX_STYLE			"nsBlockBox"	/* nscss: a block-level box */
+/* nscss: flexbox (a flex table, laytable.c) */
+#define FLEX_STYLE				"nsFlex"
+#define FLEXJUSTIFY_STYLE		"nsFlexJustify"
+#define FLEXALIGN_STYLE			"nsFlexAlign"
+#define FLEXGAP_STYLE			"nsFlexGap"
+#define FLEXITEM_STYLE			"nsFlexItem"
+#define FLEXALIGNSELF_STYLE		"nsFlexAlignSelf"
+#define STYLE_NEED_TO_POP_FLEX_ITEM	"nsNeedToPopFlexItem"
 
 #define HORIZONTAL_ALIGN_STYLE	"align"   /* css float property */
 #define CLEAR_STYLE				"clear"

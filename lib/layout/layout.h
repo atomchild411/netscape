@@ -281,6 +281,9 @@ typedef struct lo_TableCell_struct {
 	Bool in_nested_table;	/* Can be removed once we remove subdoc tags.  							 
 							 * Used to figure out whether we shoul free subdoc tags or not 
 							 */
+	/* a flex item (in a flex table: lo_TableRec.flex) */
+	double flex_grow, flex_shrink;
+	int32 flex_basis;		/* its outer width, or -1: its content's */
 } lo_TableCell;
 
 
@@ -343,7 +346,30 @@ typedef struct lo_TableRec_struct {
 	lo_TableRow *row_list;
 	lo_TableRow *row_ptr;
 	int32 *fixed_col_widths;	
+	/* A flex container (CSS flexbox, one line of items in a row): each
+	 * item is a cell of the one row, sized by the flex algorithm instead
+	 * of the table's (lo_flex_widths), placed with justify-content. */
+	intn flex;				/* LO_FLEX_NONE, _ROW, _ROW_REVERSE */
+	intn flex_justify;		/* LO_FLEX_JUSTIFY_* */
+	int32 flex_gap;			/* column-gap */
+	Bool flex_stretch;		/* align-items: stretch */
+	int32 flex_lead;		/* space before the first item */
+	int32 flex_between;		/* space added between items */
+	/* for the next cell begun: its item's flex */
+	double flex_next_grow, flex_next_shrink;
+	int32 flex_next_basis;
 } lo_TableRec;
+
+#define LO_FLEX_NONE		0
+#define LO_FLEX_ROW			1
+#define LO_FLEX_ROW_REVERSE	2
+
+#define LO_FLEX_JUSTIFY_START	0
+#define LO_FLEX_JUSTIFY_END		1
+#define LO_FLEX_JUSTIFY_CENTER	2
+#define LO_FLEX_JUSTIFY_BETWEEN	3
+#define LO_FLEX_JUSTIFY_AROUND	4
+#define LO_FLEX_JUSTIFY_EVENLY	5
 
 
 /*

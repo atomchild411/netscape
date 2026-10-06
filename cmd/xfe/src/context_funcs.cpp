@@ -51,6 +51,9 @@ extern "C" char * _XmStringGetTextConcat(XmString);
 #include "xfe.h"
 #include "xp_thrmo.h"
 #include "fe_proto.h"
+#include <X11/Xatom.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "xfe2_extern.h"
 
@@ -612,6 +615,29 @@ XFE_AllConnectionsComplete(MWContext *context)
   
   /* This shouldn't be necessary, but it doesn't hurt. */
   XFE_EnableClicking (context);
+
+  /* NS_LOAD_SIGNAL: tell whoever drives the browser (the CSS test runner)
+   * that the page and everything on it has arrived: _NETSCAPE5_LOADED on
+   * the window that takes remote commands counts the loads. */
+  if (getenv("NS_LOAD_SIGNAL") && context == top
+      && CONTEXT_DATA (context)->active_url_count == 0)
+    {
+      static int loads;
+      char buf[24];
+      Widget w = CONTEXT_WIDGET (top);
+
+      if (w && XtWindow (w))
+        {
+          Display *dpy = XtDisplay (w);
+
+          sprintf (buf, "%d", ++loads);
+          XChangeProperty (dpy, XtWindow (w),
+                           XInternAtom (dpy, "_NETSCAPE5_LOADED", False),
+                           XA_STRING, 8, PropModeReplace,
+                           (unsigned char *) buf, strlen (buf));
+          XFlush (dpy);
+        }
+    }
   
   fe_RefreshAllAnchors ();
   

@@ -888,16 +888,22 @@ LO_PopStyleTagByIndex(MWContext *context, lo_DocState **state,
 			/* unset the property to prevent reentrancy from popping the
 			 * table twice 
 			 */
+			int32 tables = (int32)pop_table->value, t;
+
 			STYLESTRUCT_SetString(top_style, 
 								  STYLE_NEED_TO_POP_TABLE, 
 								  "0", 
 								  MAX_STYLESTRUCT_PRIORITY);
-			lo_CloseTable(context, *state);
+			/* (2: a flex container's flex table in its box) */
+			for(t = 0; t < tables; t++)
+			{
+				lo_CloseTable(context, *state);
 
-			/* get the new current state */
-			doc_id = XP_DOCID(context);
-			top_state = lo_FetchTopState(doc_id);
-			*state = lo_TopSubState(top_state);
+				/* get the new current state */
+				doc_id = XP_DOCID(context);
+				top_state = lo_FetchTopState(doc_id);
+				*state = lo_TopSubState(top_state);
+			}
 		}
 
 		STYLESTRUCT_FreeSSNumber(top_style, pop_table);
@@ -919,6 +925,26 @@ LO_PopStyleTagByIndex(MWContext *context, lo_DocState **state,
 		STYLESTRUCT_FreeSSNumber(top_style, bottom_padding);
 	}
 		
+	/* the end of a flex item: the end of its cell (after its own box) */
+	if((property = STYLESTRUCT_GetString(top_style,
+										 STYLE_NEED_TO_POP_FLEX_ITEM)) != NULL)
+	{
+		XP_Bool pop = !strcmp(property, "1");
+
+		/* (once: pops can come again) */
+		STYLESTRUCT_SetString(top_style, STYLE_NEED_TO_POP_FLEX_ITEM, "0",
+							  MAX_STYLESTRUCT_PRIORITY);
+		XP_FREE(property);
+		if(pop && (*state)->is_a_subdoc == SUBDOC_CELL)
+		{
+			lo_TopState *top_state;
+
+			lo_EndTableCell(context, *state, FALSE);
+			top_state = lo_FetchTopState(XP_DOCID(context));
+			*state = lo_TopSubState(top_state);
+		}
+	}
+
 	property = STYLESTRUCT_GetString(top_style, STYLE_NEED_TO_POP_ALIGNMENT);
 	if(property)
 	{

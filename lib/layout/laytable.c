@@ -3659,6 +3659,12 @@ lo_BeginTableCellAttributes(MWContext *context,
 	table_cell->cell = NULL;
 	table_cell->next = NULL;
 	table_cell->beginning_tag_count = state->top_state->tag_count;
+	table_cell->flex_grow = table->flex_next_grow;
+	table_cell->flex_shrink = table->flex_next_shrink;
+	table_cell->flex_basis = table->flex_next_basis;
+	table->flex_next_grow = 0;
+	table->flex_next_shrink = 1;
+	table->flex_next_basis = -1;
 
 	lo_InitForBeginCell( table_row, table_cell );
 	
@@ -5009,6 +5015,15 @@ lo_BeginTableAttributes(MWContext *context,
 	table->inner_left_pad = TABLE_DEF_INNER_CELL_PAD;
 	table->inner_right_pad = TABLE_DEF_INNER_CELL_PAD;
 	table->inter_cell_pad = TABLE_DEF_INTER_CELL_PAD;
+	table->flex = LO_FLEX_NONE;
+	table->flex_justify = LO_FLEX_JUSTIFY_START;
+	table->flex_gap = 0;
+	table->flex_stretch = TRUE;
+	table->flex_lead = 0;
+	table->flex_between = 0;
+	table->flex_next_grow = 0;
+	table->flex_next_shrink = 1;
+	table->flex_next_basis = -1;
 
 	table->current_subdoc = (LO_SubDocStruct *)lo_NewElement(context, state, LO_SUBDOC, NULL, 0);
 	table->current_subdoc->type = LO_SUBDOC;
@@ -6589,6 +6604,151 @@ lo_FreePartialTable(MWContext *context, lo_DocState *state, lo_TableRec *table)
 
 
 
+/*
+ * A flex table's widths (CSS flexbox, one line in a row): each column is
+ * an item, its cell measured as the table measures cells (dim the content's
+ * width, min_dim its narrowest).  Base sizes from flex-basis (or the
+ * content), then the free space is shared out by flex-grow, or taken back
+ * by flex-shrink (weighted by the base size, never below the item's
+ * narrowest), then whatever is left placed by justify-content.
+ */
+static void
+lo_flex_widths(lo_TableRec *table, lo_cell_data XP_HUGE *cell_array,
+			   lo_TableCell *blank_cell, int32 width_limit, int32 cell_pad)
+{
+	lo_table_span *sp;
+	lo_TableCell *cell;
+	int32 n = 0, avail, sum = 0, left, i;
+	int32 base[256], hyp[256], minw[256], fin[256];
+	double grow[256], shrink[256], total_grow = 0;
+	Bool frozen[256];
+
+	for (sp = table->width_spans; sp != NULL && n < 256; sp = sp->next, n++)
+	{
+		/* the items are the first row's cells */
+		cell = (n < table->cols) ? cell_array[n].cell : NULL;
+		if (cell == blank_cell)
+			cell = NULL;
+		base[n] = (cell && cell->flex_basis >= 0) ? cell->flex_basis : sp->dim;
+		minw[n] = sp->min_dim;
+		hyp[n] = base[n] > minw[n] ? base[n] : minw[n];
+		grow[n] = cell ? cell->flex_grow : 0;
+		shrink[n] = cell ? cell->flex_shrink : 1;
+		total_grow += grow[n];
+		sum += hyp[n];
+		frozen[n] = FALSE;
+	}
+	if (n == 0)
+		return;
+	avail = width_limit - (n + 1) * cell_pad - (n - 1) * table->flex_gap
+		- table->table_ele->border_left_width
+		- table->table_ele->border_right_width;
+	for (i = 0; i < n; i++)
+		fin[i] = hyp[i];
+	left = avail - sum;
+	if (left > 0 && total_grow > 0)
+	{
+		int32 given = 0, last = -1;
+
+		for (i = 0; i < n; i++)
+			if (grow[i] > 0)
+			{
+				int32 add = (int32)(left * grow[i] / total_grow);
+
+				fin[i] += add;
+				given += add;
+				last = i;
+			}
+		fin[last] += left - given;		/* the rounding */
+	}
+	else if (left < 0)
+	{
+		int32 pass;
+
+		/* shrink, freezing items that reach their narrowest */
+		for (pass = 0; pass < n && left < 0; pass++)
+		{
+			double scaled = 0;
+			int32 taken = 0;
+
+			for (i = 0; i < n; i++)
+				if (!frozen[i])
+					scaled += shrink[i] * base[i];
+			if (scaled <= 0)
+				break;
+			for (i = 0; i < n; i++)
+			{
+				int32 cut, want;
+
+				if (frozen[i])
+					continue;
+				cut = (int32)(-left * shrink[i] * base[i] / scaled + 0.5);
+				want = fin[i] - cut;
+				if (want <= minw[i])
+				{
+					want = minw[i];
+					frozen[i] = TRUE;
+				}
+				taken += fin[i] - want;
+				fin[i] = want;
+			}
+			left += taken;
+			if (taken == 0)
+				break;
+		}
+	}
+
+	sum = 0;
+	for (sp = table->width_spans, i = 0; sp != NULL && i < n; sp = sp->next, i++)
+	{
+		sp->dim = fin[i];
+		if (sp->min_dim > fin[i])
+			sp->min_dim = fin[i];
+		sum += fin[i];
+	}
+
+	/* justify-content: what is left, before and between the items */
+	left = avail - sum;
+	table->flex_lead = 0;
+	table->flex_between = table->flex_gap;
+	if (left > 0)
+	{
+		switch (table->flex_justify)
+		{
+		case LO_FLEX_JUSTIFY_END:
+			table->flex_lead = left;
+			break;
+		case LO_FLEX_JUSTIFY_CENTER:
+			table->flex_lead = left / 2;
+			break;
+		case LO_FLEX_JUSTIFY_BETWEEN:
+			if (n > 1)
+				table->flex_between += left / (n - 1);
+			break;
+		case LO_FLEX_JUSTIFY_AROUND:
+			table->flex_between += left / n;
+			table->flex_lead = left / n / 2;
+			break;
+		case LO_FLEX_JUSTIFY_EVENLY:
+			table->flex_between += left / (n + 1);
+			table->flex_lead = left / (n + 1);
+			break;
+		default:
+			break;
+		}
+	}
+	if (lo_TableTrace())
+	{
+		fprintf(lo_TableTrace(), "flex %p: %ld items avail %ld lead %ld between %ld:",
+			(void *)table, (long)n, (long)avail, (long)table->flex_lead,
+			(long)table->flex_between);
+		for (i = 0; i < n; i++)
+			fprintf(lo_TableTrace(), " %ld(%ld/%ld)", (long)fin[i],
+				(long)base[i], (long)minw[i]);
+		fputc('\n', lo_TableTrace());
+	}
+}
+
 void
 lo_EndTable(MWContext *context, lo_DocState *state, lo_TableRec *table, Bool relayout)
 {
@@ -6721,6 +6881,17 @@ fprintf(stderr, "lo_EndTable called\n");
 	{
 		table_width += (2 * table_pad);
 		min_table_width += (2 * table_pad);
+	}
+
+	/* a flex table sizes its items itself */
+	if (table->flex != LO_FLEX_NONE)
+	{
+		width_limit = (state->win_width - state->left_margin - state->win_right);
+		if (table->width > 0)
+			width_limit = table->width;
+		lo_flex_widths(table, cell_array, &blank_cell, width_limit, cell_pad);
+		relayout_pass = TRUE;
+		goto flex_widths_done;
 	}
 
 	/*
@@ -6943,6 +7114,7 @@ fprintf(stderr, "lo_EndTable called\n");
 		add_ptr->dim += (add_width - add);
 	}
 
+flex_widths_done:
 	rowspan_pass = FALSE;
 
 	if (lo_TableTrace())
@@ -7015,6 +7187,8 @@ fprintf(stderr, "lo_EndTable called\n");
 	table_width += cell_pad;
 	table_width += (table->table_ele->border_left_width + 
 		table->table_ele->border_right_width);
+	if (table->flex != LO_FLEX_NONE && table->width > table_width)
+		table_width = table->width;		/* the container, with its spaces */
 	min_table_width += cell_pad;
 	min_table_width += (table->table_ele->border_left_width + 
 		table->table_ele->border_right_width);
@@ -7290,6 +7464,8 @@ fprintf(stderr, "lo_EndTable called\n");
 	for (y=0; y < table->rows; y++)
 	{
 		cell_x = state->x;
+		if (table->flex != LO_FLEX_NONE)
+			cell_x += table->flex_lead;
 		col_max = table->width_spans;
 		for (x=0; x < table->cols; x++)
 		{
@@ -7301,6 +7477,8 @@ fprintf(stderr, "lo_EndTable called\n");
 			if ((cell_ptr == &blank_cell)||(cell_ptr == NULL))
 			{
 				cell_x = cell_x + col_max->dim + cell_pad;
+				if (table->flex != LO_FLEX_NONE)
+					cell_x += table->flex_between;
 				col_max = col_max->next;
 				continue;
 			}
@@ -7450,6 +7628,8 @@ fprintf(stderr, "lo_EndTable called\n");
 			}
 			*/
 			cell_x = cell_x + col_max->dim + cell_pad;
+			if (table->flex != LO_FLEX_NONE)
+				cell_x += table->flex_between;
 			col_max = col_max->next;
 		}
 		cell_y = cell_y + row_max->dim + cell_pad;

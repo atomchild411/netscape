@@ -119,11 +119,11 @@ fe_server_handle_property_change (Display *dpy, Window window, XEvent *event)
 	}
       else if (!data || !*data)
 	{
-	  fprintf (stderr, 
-		   XP_GetString(XFE_REMOTE_S_INVALID_DATA_ON_PROPERTY),
-		   fe_progname,
-		   MOZILLA_COMMAND_PROP,
-		   (unsigned int) window);
+	  /* Already taken: a second notice for a command read with the
+	   * first (a sender that sends again before the answer).  Nothing
+	   * to do, and nothing to tell anyone (stderr becomes a dialog). */
+	  if (data)
+	    XFree (data);
 	  return;
 	}
       else
