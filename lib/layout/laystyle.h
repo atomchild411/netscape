@@ -112,6 +112,18 @@ extern XP_Bool LO_IsStyledUnknownTag(lo_DocState *state, PA_Tag *tag, XP_Bool *i
 #define FLEXWRAP_STYLE			"nsFlexWrap"
 #define FLEXITEM_STYLE			"nsFlexItem"
 #define FLEXALIGNSELF_STYLE		"nsFlexAlignSelf"
+/* nscss: grid layout (nsFlex "grid": a flex table, laycssgrid.c) */
+#define GRIDCOLS_STYLE			"nsGridCols"
+#define GRIDROWS_STYLE			"nsGridRows"
+#define GRIDAREAS_STYLE			"nsGridAreas"
+#define GRIDAUTOCOLS_STYLE		"nsGridAutoCols"
+#define GRIDAUTOROWS_STYLE		"nsGridAutoRows"
+#define GRIDFLOW_STYLE			"nsGridFlow"
+#define GRIDROWGAP_STYLE		"nsGridRowGap"
+#define GRIDJUSTIFY_STYLE		"nsGridJustify"
+#define GRIDALIGNCONTENT_STYLE	"nsGridAlignContent"
+#define GRIDITEM_STYLE			"nsGridItem"
+#define GRIDJUSTIFYSELF_STYLE	"nsGridJustifySelf"
 #define STYLE_NEED_TO_POP_FLEX_ITEM	"nsNeedToPopFlexItem"
 
 #define HORIZONTAL_ALIGN_STYLE	"align"   /* css float property */

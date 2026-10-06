@@ -73,12 +73,34 @@
  * justify-content, align-items and column gap; an item's "grow shrink
  * basis" and its align-self. */
 #define FLEX_PROP				"nsFlex"
+/* CSS positioning, for layout's layers (layblock.c,
+ * lo_SetStyleSheetLayerProperties): absolute (fixed too) or relative,
+ * with its offsets and z-index */
+#define POSITION_PROP			"position"
+#define TOP_PROP				"top"
+#define LEFT_PROP				"left"
+#define ZINDEX_PROP				"zIndex"
 #define FLEXJUSTIFY_PROP		"nsFlexJustify"
 #define FLEXALIGN_PROP			"nsFlexAlign"
 #define FLEXGAP_PROP			"nsFlexGap"
 #define FLEXWRAP_PROP			"nsFlexWrap"
 #define FLEXITEM_PROP			"nsFlexItem"
 #define FLEXALIGNSELF_PROP		"nsFlexAlignSelf"
+/* Grid layout, in a flex table too (nsFlex "grid"): the container's track
+ * lists, areas, implicit tracks, auto-placement, row gap (the column gap is
+ * nsFlexGap), justify-items and align-content; an item's lines ("row-start
+ * / column-start / row-end / column-end") and justify-self. */
+#define GRIDCOLS_PROP			"nsGridCols"
+#define GRIDROWS_PROP			"nsGridRows"
+#define GRIDAREAS_PROP			"nsGridAreas"
+#define GRIDAUTOCOLS_PROP		"nsGridAutoCols"
+#define GRIDAUTOROWS_PROP		"nsGridAutoRows"
+#define GRIDFLOW_PROP			"nsGridFlow"
+#define GRIDROWGAP_PROP			"nsGridRowGap"
+#define GRIDJUSTIFY_PROP		"nsGridJustify"
+#define GRIDALIGNCONTENT_PROP	"nsGridAlignContent"
+#define GRIDITEM_PROP			"nsGridItem"
+#define GRIDJUSTIFYSELF_PROP	"nsGridJustifySelf"
 #define BORDERTOPWIDTH_PROP		"borderTopWidth"
 #define BORDERRIGHTWIDTH_PROP	"borderRightWidth"
 #define BORDERBOTTOMWIDTH_PROP	"borderBottomWidth"
@@ -160,6 +182,7 @@ struct NSCSS_Node {
 #define NSCSS_FLEX_NONE		0
 #define NSCSS_FLEX_ROW		1	/* layout's flex table (laytable.c) */
 #define NSCSS_FLEX_COLUMN	2	/* likewise, in a column */
+#define NSCSS_FLEX_GRID		3	/* a grid, in a flex table too */
 
 static css_select_handler nscss_handler;
 
@@ -2061,6 +2084,211 @@ nscss_export_flex_item(NSCSS_Doc *doc, const css_computed_style *st,
 	}
 }
 
+/* A track list as layout reads it: lengths in units it converts (px, em,
+ * pt, ...), the others (rem, vw, ch, ...) made so by nscss_len; fr, %,
+ * keywords, names and functions as they are. */
+static void
+nscss_set_tracks(NSCSS_Doc *doc, StyleStruct *style, char *name,
+				 lwc_string *tracks)
+{
+	static const struct { const char *u; css_unit unit; } units[] = {
+		{ "rem", CSS_UNIT_REM }, { "vw", CSS_UNIT_VW }, { "vh", CSS_UNIT_VH },
+		{ "vmin", CSS_UNIT_VMIN }, { "vmax", CSS_UNIT_VMAX },
+		{ "ch", CSS_UNIT_CH }, { "lh", CSS_UNIT_LH }, { "q", CSS_UNIT_Q },
+		{ "vi", CSS_UNIT_VI }, { "vb", CSS_UNIT_VB }
+	};
+	const char *p, *end;
+	char *out, *o, num[48];
+	size_t n;
+
+	if (tracks == NULL)
+		return;
+	p = lwc_string_data(tracks);
+	end = p + lwc_string_length(tracks);
+	out = o = XP_ALLOC(lwc_string_length(tracks) * 4 + 16);
+	if (out == NULL)
+		return;
+	while (p < end) {
+		const char *q = p;
+		char *e;
+		double v;
+		size_t k, ul = 0;
+
+		/* a number starts a token (not inside a name: "col-1") */
+		if ((isdigit((unsigned char) *p) || *p == '.' ||
+			 ((*p == '-' || *p == '+') && p + 1 < end &&
+			  (isdigit((unsigned char) p[1]) || p[1] == '.'))) &&
+			(o == out || !(isalnum((unsigned char) o[-1]) ||
+						   o[-1] == '-' || o[-1] == '_'))) {
+			v = strtod(p, &e);
+			q = e;
+			while (q + ul < end && isalpha((unsigned char) q[ul]))
+				ul++;
+			for (k = 0; k < sizeof units / sizeof units[0]; k++)
+				if (strlen(units[k].u) == ul &&
+					!strncasecomp(q, units[k].u, ul))
+					break;
+			if (k < sizeof units / sizeof units[0] &&
+				nscss_len(doc, num, FLTTOFIX(v), units[k].unit)) {
+				n = strlen(num);
+				XP_MEMCPY(o, num, n);
+				o += n;
+				p = q + ul;
+				continue;
+			}
+			n = (q + ul) - p;
+			XP_MEMCPY(o, p, n);
+			o += n;
+			p = q + ul;
+			continue;
+		}
+		*o++ = *p++;
+	}
+	*o = '\0';
+	nscss_set(style, name, out);
+	XP_FREE(out);
+}
+
+static void
+nscss_export_grid_container(NSCSS_Doc *doc, const css_computed_style *st,
+							StyleStruct *style)
+{
+	char buf[64];
+	css_fixed len;
+	css_unit unit;
+	lwc_string *s;
+
+	nscss_set(style, FLEX_PROP, "grid");
+	if (css_computed_grid_template_columns(st, &s) && s)
+		nscss_set_tracks(doc, style, GRIDCOLS_PROP, s);
+	if (css_computed_grid_template_rows(st, &s) && s)
+		nscss_set_tracks(doc, style, GRIDROWS_PROP, s);
+	if (css_computed_grid_template_areas(st, &s) && s)
+		nscss_set(style, GRIDAREAS_PROP, lwc_string_data(s));
+	if (css_computed_grid_auto_columns(st, &s) && s)
+		nscss_set_tracks(doc, style, GRIDAUTOCOLS_PROP, s);
+	if (css_computed_grid_auto_rows(st, &s) && s)
+		nscss_set_tracks(doc, style, GRIDAUTOROWS_PROP, s);
+	switch (css_computed_grid_auto_flow(st)) {
+	case CSS_GRID_AUTO_FLOW_COLUMN: nscss_set(style, GRIDFLOW_PROP, "column"); break;
+	case CSS_GRID_AUTO_FLOW_ROW_DENSE: nscss_set(style, GRIDFLOW_PROP, "row dense"); break;
+	case CSS_GRID_AUTO_FLOW_COLUMN_DENSE: nscss_set(style, GRIDFLOW_PROP, "column dense"); break;
+	default: break;				/* row */
+	}
+	if (css_computed_column_gap(st, &len, &unit) == CSS_COLUMN_GAP_SET &&
+		len > 0) {
+		if (unit == CSS_UNIT_PCT)
+			PR_snprintf(buf, sizeof buf, "%g%%", FIXTOFLT(len));
+		if (unit == CSS_UNIT_PCT || nscss_len(doc, buf, len, unit))
+			nscss_set(style, FLEXGAP_PROP, buf);
+	}
+	if (css_computed_row_gap(st, &len, &unit) == CSS_ROW_GAP_SET &&
+		len > 0) {
+		if (unit == CSS_UNIT_PCT)
+			PR_snprintf(buf, sizeof buf, "%g%%", FIXTOFLT(len));
+		if (unit == CSS_UNIT_PCT || nscss_len(doc, buf, len, unit))
+			nscss_set(style, GRIDROWGAP_PROP, buf);
+	}
+	switch (css_computed_align_items(st)) {
+	case CSS_ALIGN_ITEMS_FLEX_START: nscss_set(style, FLEXALIGN_PROP, "start"); break;
+	case CSS_ALIGN_ITEMS_FLEX_END: nscss_set(style, FLEXALIGN_PROP, "end"); break;
+	case CSS_ALIGN_ITEMS_CENTER: nscss_set(style, FLEXALIGN_PROP, "center"); break;
+	case CSS_ALIGN_ITEMS_BASELINE: nscss_set(style, FLEXALIGN_PROP, "start"); break;
+	default: break;				/* stretch */
+	}
+	switch (css_computed_justify_items(st)) {
+	case CSS_JUSTIFY_ITEMS_START:
+	case CSS_JUSTIFY_ITEMS_LEFT:
+	case CSS_JUSTIFY_ITEMS_BASELINE: nscss_set(style, GRIDJUSTIFY_PROP, "start"); break;
+	case CSS_JUSTIFY_ITEMS_END: nscss_set(style, GRIDJUSTIFY_PROP, "end"); break;
+	case CSS_JUSTIFY_ITEMS_CENTER: nscss_set(style, GRIDJUSTIFY_PROP, "center"); break;
+	default: break;				/* normal, stretch */
+	}
+	switch (css_computed_justify_content(st)) {
+	case CSS_JUSTIFY_CONTENT_FLEX_END: nscss_set(style, FLEXJUSTIFY_PROP, "end"); break;
+	case CSS_JUSTIFY_CONTENT_CENTER: nscss_set(style, FLEXJUSTIFY_PROP, "center"); break;
+	case CSS_JUSTIFY_CONTENT_SPACE_BETWEEN: nscss_set(style, FLEXJUSTIFY_PROP, "space-between"); break;
+	case CSS_JUSTIFY_CONTENT_SPACE_AROUND: nscss_set(style, FLEXJUSTIFY_PROP, "space-around"); break;
+	case CSS_JUSTIFY_CONTENT_SPACE_EVENLY: nscss_set(style, FLEXJUSTIFY_PROP, "space-evenly"); break;
+	default: break;				/* normal, start */
+	}
+	switch (css_computed_align_content(st)) {
+	case CSS_ALIGN_CONTENT_FLEX_START: nscss_set(style, GRIDALIGNCONTENT_PROP, "start"); break;
+	case CSS_ALIGN_CONTENT_FLEX_END: nscss_set(style, GRIDALIGNCONTENT_PROP, "end"); break;
+	case CSS_ALIGN_CONTENT_CENTER: nscss_set(style, GRIDALIGNCONTENT_PROP, "center"); break;
+	case CSS_ALIGN_CONTENT_SPACE_BETWEEN: nscss_set(style, GRIDALIGNCONTENT_PROP, "space-between"); break;
+	case CSS_ALIGN_CONTENT_SPACE_AROUND: nscss_set(style, GRIDALIGNCONTENT_PROP, "space-around"); break;
+	case CSS_ALIGN_CONTENT_SPACE_EVENLY: nscss_set(style, GRIDALIGNCONTENT_PROP, "space-evenly"); break;
+	default: break;				/* normal, stretch */
+	}
+}
+
+static void
+nscss_export_grid_item(const css_computed_style *st, StyleStruct *style)
+{
+	char buf[400];
+	lwc_string *l[4];
+	int k;
+
+	css_computed_grid_row_start(st, &l[0]);
+	css_computed_grid_column_start(st, &l[1]);
+	css_computed_grid_row_end(st, &l[2]);
+	css_computed_grid_column_end(st, &l[3]);
+	if (l[0] || l[1] || l[2] || l[3]) {
+		buf[0] = '\0';
+		for (k = 0; k < 4; k++)
+			PR_snprintf(buf + strlen(buf), sizeof buf - strlen(buf), "%s%s",
+						k ? " / " : "", l[k] ? lwc_string_data(l[k]) : "auto");
+		nscss_set(style, GRIDITEM_PROP, buf);
+	}
+	switch (css_computed_justify_self(st)) {
+	case CSS_JUSTIFY_SELF_START:
+	case CSS_JUSTIFY_SELF_LEFT:
+	case CSS_JUSTIFY_SELF_BASELINE: nscss_set(style, GRIDJUSTIFYSELF_PROP, "start"); break;
+	case CSS_JUSTIFY_SELF_END: nscss_set(style, GRIDJUSTIFYSELF_PROP, "end"); break;
+	case CSS_JUSTIFY_SELF_CENTER: nscss_set(style, GRIDJUSTIFYSELF_PROP, "center"); break;
+	case CSS_JUSTIFY_SELF_NORMAL:
+	case CSS_JUSTIFY_SELF_STRETCH: nscss_set(style, GRIDJUSTIFYSELF_PROP, "stretch"); break;
+	default: break;				/* auto: the container's justify-items */
+	}
+}
+
+/* An absolutely or relatively positioned element: its layer.  Offsets are
+ * layout's left and top (from the containing layer); a relative one's right
+ * or bottom (with left or top auto) are the same moves the other way.
+ * Absolute right and bottom need the containing block's size, which layout
+ * does not give: not yet. */
+static void
+nscss_export_position(NSCSS_Doc *doc, const css_computed_style *st,
+					  StyleStruct *style)
+{
+	char buf[64];
+	css_fixed len;
+	css_unit unit;
+	int32_t z;
+	uint8_t pos = css_computed_position(st);
+	XP_Bool relative = pos == CSS_POSITION_RELATIVE;
+
+	if (pos != CSS_POSITION_ABSOLUTE && pos != CSS_POSITION_FIXED &&
+		!relative)
+		return;
+	nscss_set(style, POSITION_PROP, relative ? "relative" : "absolute");
+	if (css_computed_top(st, &len, &unit) == CSS_TOP_SET)
+		nscss_set(style, TOP_PROP, nscss_len(doc, buf, len, unit));
+	else if (relative &&
+			 css_computed_bottom(st, &len, &unit) == CSS_BOTTOM_SET)
+		nscss_set(style, TOP_PROP, nscss_len(doc, buf, -len, unit));
+	if (css_computed_left(st, &len, &unit) == CSS_LEFT_SET)
+		nscss_set(style, LEFT_PROP, nscss_len(doc, buf, len, unit));
+	else if (relative &&
+			 css_computed_right(st, &len, &unit) == CSS_RIGHT_SET)
+		nscss_set(style, LEFT_PROP, nscss_len(doc, buf, -len, unit));
+	if (css_computed_z_index(st, &z) == CSS_Z_INDEX_SET) {
+		PR_snprintf(buf, sizeof buf, "%ld", (long) z);
+		nscss_set(style, ZINDEX_PROP, buf);
+	}
+}
+
 /* replaced elements: sized by the style sheet even inline */
 static const char *const nscss_replaced_tags[] = {
 	"img", "object", "embed", "video", "canvas", "iframe", NULL
@@ -2104,6 +2332,8 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		css_computed_position(st) != CSS_POSITION_ABSOLUTE &&
 		css_computed_position(st) != CSS_POSITION_FIXED) {
 		nscss_export_flex_item(doc, st, style);
+		if (node->parent->flex == NSCSS_FLEX_GRID)
+			nscss_export_grid_item(st, style);
 		nscss_set(style, DISPLAY_PROP, "block");
 		block = TRUE;
 		t = CSS_DISPLAY_BLOCK;
@@ -2116,8 +2346,15 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 			NSCSS_FLEX_COLUMN : NSCSS_FLEX_ROW;
 		nscss_export_flex_container(doc, st, style);
 	}
-	/* Layout has no grid layout, nor inline flex.  A grid's items, or an
-	 * inline flex container's, flow side by side as inline content does:
+	/* a grid (an inline one too: laid out as a block) */
+	if (t == CSS_DISPLAY_GRID || t == CSS_DISPLAY_INLINE_GRID) {
+		node->flex = NSCSS_FLEX_GRID;
+		nscss_export_grid_container(doc, st, style);
+		block = TRUE;
+		t = CSS_DISPLAY_GRID;
+	}
+	/* Layout has no inline flex.  An inline flex container's items flow
+	 * side by side as inline content does:
 	 * closer than a column of blocks (a navigation bar laid out as a
 	 * list). */
 	if (t == CSS_DISPLAY_INLINE_FLEX) {
@@ -2125,8 +2362,7 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		node->flex_row = fd == CSS_FLEX_DIRECTION_ROW ||
 						 fd == CSS_FLEX_DIRECTION_ROW_REVERSE ||
 						 fd == CSS_FLEX_DIRECTION_INHERIT;
-	} else if (t == CSS_DISPLAY_GRID || t == CSS_DISPLAY_INLINE_GRID ||
-			   /* an inline block's own blocks (a details' summary, a
+	} else if (/* an inline block's own blocks (a details' summary, a
 			    * badge's divs) stay on its line */
 			   t == CSS_DISPLAY_INLINE_BLOCK) {
 		node->flex_row = TRUE;
@@ -2208,11 +2444,10 @@ nscss_export(NSCSS_Doc *doc, NSCSS_Node *node, const css_computed_style *st,
 		}
 	}
 
-	/* An absolutely positioned box is out of the flow; layout puts its
-	 * content in the flow, but drawing its box there (borders, sizes,
-	 * margins: often a decorative backdrop) gets in the way. */
-	if (block && css_computed_position(st) != CSS_POSITION_ABSOLUTE &&
-		css_computed_position(st) != CSS_POSITION_FIXED)
+	/* Positioned elements are layers (layout lays their content out apart
+	 * and puts it where the offsets say); their box goes with them. */
+	nscss_export_position(doc, st, style);
+	if (block)
 		nscss_export_box(doc, node, st, style);
 
 	/* Images and the like are sized by the style sheet as they are,

@@ -3376,6 +3376,7 @@ lo_flex_container_begin(MWContext *context, lo_DocState *state,
 	SS_Number *gap;
 
 	table->flex = !strcmp(flex, "row-reverse") ? LO_FLEX_ROW_REVERSE
+		: !strcmp(flex, "grid") ? LO_FLEX_GRID
 		: !strcmp(flex, "column") ? LO_FLEX_COLUMN
 		: !strcmp(flex, "column-reverse") ? LO_FLEX_COLUMN_REVERSE
 		: LO_FLEX_ROW;
@@ -3415,6 +3416,10 @@ lo_flex_container_begin(MWContext *context, lo_DocState *state,
 	if (gap && gap->value > 0)
 		table->flex_gap = (int32)gap->value;
 	STYLESTRUCT_FreeSSNumber(style_struct, gap);
+	if (table->flex == LO_FLEX_GRID && !table->grid)
+		table->grid = lo_cssgrid_new(context, state, style_struct,
+			table->width > 0 ? table->width
+			: state->right_margin - state->left_margin);
 }
 
 /* The flex table inside a flex container's box (in its cell, STATE): as
@@ -3445,7 +3450,9 @@ lo_flex_nested_begin(MWContext *context, lo_DocState *state,
 							state->current_table, flex);
 	valign = "TOP";
 	ai = STYLESTRUCT_GetString(style_struct, FLEXALIGN_STYLE);
-	if(ai && !strcmp(ai, "center"))
+	if(!strcmp(flex, "grid"))
+		;					/* a grid item's cell is its box */
+	else if(ai && !strcmp(ai, "center"))
 		valign = "MIDDLE";
 	else if(ai && !strcmp(ai, "end"))
 		valign = "BOTTOM";
@@ -3566,6 +3573,35 @@ lo_flex_item_begin(MWContext *context, lo_DocState *state,
 			XP_FREE(self);
 		}
 	}
+	if (table->flex == LO_FLEX_GRID)
+	{
+		/* a grid item: its lines, justify-self, and align-self (or the
+		 * grid's align-items) */
+		char *lines = STYLESTRUCT_GetString(style_struct, GRIDITEM_STYLE);
+
+		lo_cssgrid_item_lines(table->grid, lines, table->grid_next_lines);
+		XP_FREEIF(lines);
+		self = STYLESTRUCT_GetString(style_struct, GRIDJUSTIFYSELF_STYLE);
+		table->grid_next_justify = -1;
+		if (self)
+		{
+			table->grid_next_justify = !strcmp(self, "center") ? LO_FLEX_ALIGN_CENTER
+				: !strcmp(self, "end") ? LO_FLEX_ALIGN_END
+				: !strcmp(self, "stretch") ? LO_FLEX_ALIGN_STRETCH
+				: LO_FLEX_ALIGN_START;
+			XP_FREE(self);
+		}
+		table->flex_next_align = table->flex_align_items;
+		self = STYLESTRUCT_GetString(style_struct, FLEXALIGNSELF_STYLE);
+		if (self)
+		{
+			table->flex_next_align = !strcmp(self, "center") ? LO_FLEX_ALIGN_CENTER
+				: !strcmp(self, "end") ? LO_FLEX_ALIGN_END
+				: !strcmp(self, "stretch") ? LO_FLEX_ALIGN_STRETCH
+				: LO_FLEX_ALIGN_START;
+			XP_FREE(self);
+		}
+	}
 	table->flex_next_grow = grow;
 	table->flex_next_shrink = shrink;
 	table->flex_next_basis = basis_px;
@@ -3592,8 +3628,9 @@ lo_flex_item_begin(MWContext *context, lo_DocState *state,
 		*stretched = FALSE;
 	STYLESTRUCT_FreeSSNumber(style_struct, num);
 	/* a column's item: its cell is exactly its box (its width across,
-	 * its size along the column) */
-	if (LO_FLEX_IS_COLUMN(table))
+	 * its size along the column); a grid item's too (laycssgrid.c sizes
+	 * it in its area) */
+	if (LO_FLEX_IS_COLUMN(table) || table->flex == LO_FLEX_GRID)
 	{
 		*stretched = TRUE;
 		valign = "top";
@@ -4292,7 +4329,9 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 				/* align-items, for the items without align-self */
 				char *ai = STYLESTRUCT_GetString(style_struct, FLEXALIGN_STYLE);
 
-				if(ai && !strcmp(ai, "center"))
+				if(!strcmp(flex_value, "grid"))
+					;			/* a grid item's cell is its box */
+				else if(ai && !strcmp(ai, "center"))
 					StrAllocCopy(row_valign_attr, "MIDDLE");
 				else if(ai && !strcmp(ai, "end"))
 					StrAllocCopy(row_valign_attr, "BOTTOM");

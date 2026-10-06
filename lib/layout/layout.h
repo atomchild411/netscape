@@ -287,6 +287,11 @@ typedef struct lo_TableCell_struct {
 	int32 flex_order;		/* order */
 	int32 flex_cross;		/* a column's item: its width, or -1 */
 	intn flex_align;		/* a column's item: LO_FLEX_ALIGN_* */
+	/* a grid item: its lines (row start, column start, row end, column
+	 * end: a line from 1, 0 auto, -N span N) and justify-self (-1: the
+	 * grid's justify-items) */
+	int32 grid_lines[4];
+	intn grid_justify;
 } lo_TableCell;
 
 
@@ -373,6 +378,9 @@ typedef struct lo_TableRec_struct {
 	int32 flex_next_basis, flex_next_order;
 	int32 flex_next_cross;
 	intn flex_next_align;
+	struct lo_CSSGridRec_struct *grid;	/* LO_FLEX_GRID: laycssgrid.c */
+	int32 grid_next_lines[4];
+	intn grid_next_justify;
 } lo_TableRec;
 
 #define LO_FLEX_NONE		0
@@ -380,7 +388,52 @@ typedef struct lo_TableRec_struct {
 #define LO_FLEX_ROW_REVERSE	2
 #define LO_FLEX_COLUMN		3
 #define LO_FLEX_COLUMN_REVERSE	4
-#define LO_FLEX_IS_COLUMN(t)	((t)->flex >= LO_FLEX_COLUMN)
+#define LO_FLEX_GRID		5	/* CSS grid layout (laycssgrid.c) */
+#define LO_FLEX_IS_COLUMN(t)	((t)->flex == LO_FLEX_COLUMN || \
+								 (t)->flex == LO_FLEX_COLUMN_REVERSE)
+
+/* A track's sizing function (min or max of minmax()) */
+#define LO_GT_PX		0	/* a length (v: pixels) */
+#define LO_GT_PCT		1	/* a percentage (v) of the grid's size */
+#define LO_GT_FR		2	/* a flexible track (v: fr) */
+#define LO_GT_AUTO		3
+#define LO_GT_MIN		4	/* min-content */
+#define LO_GT_MAX		5	/* max-content */
+#define LO_GT_FIT		6	/* fit-content(v pixels) */
+
+typedef struct lo_CSSGridTrack_struct {
+	intn min_kind, max_kind;
+	double min_v, max_v;
+} lo_CSSGridTrack;
+
+typedef struct lo_CSSGridName_struct {
+	char *name;
+	int32 line;					/* from 1 */
+} lo_CSSGridName;
+
+/* A grid container's flex table (lo_TableRec.grid): its explicit tracks
+ * and their line names (with the areas' NAME-start and NAME-end lines),
+ * the implicit tracks', auto-placement, gaps and alignment; laycssgrid.c
+ * places the items and sizes the tracks. */
+typedef struct lo_CSSGridRec_struct {
+	lo_CSSGridTrack *tracks[2];	/* explicit: [0] rows, [1] columns */
+	int32 ntracks[2];
+	lo_CSSGridTrack *autos[2];		/* grid-auto-rows, grid-auto-columns */
+	int32 nautos[2];
+	lo_CSSGridName *names[2];
+	int32 nnames[2];
+	Bool flow_column, dense;
+	int32 gap[2];				/* row-gap, column-gap (px) */
+	double gap_pct[2];			/* or a percentage, else -1 */
+	intn justify_items;			/* LO_FLEX_ALIGN_* */
+	intn align_content;			/* LO_FLEX_JUSTIFY_*, -1 normal */
+	/* the layout: per item its area (rows r0..r1, columns c0..c1, from
+	 * 0, end exclusive); the tracks' sizes and offsets */
+	int32 nitems;
+	int32 *area;				/* 4 per item: r0 c0 r1 c1 */
+	int32 n[2];					/* rows, columns */
+	int32 *size[2], *pos[2];
+} lo_CSSGridRec;
 
 #define LO_FLEX_ALIGN_STRETCH	0
 #define LO_FLEX_ALIGN_START		1
@@ -955,6 +1008,23 @@ extern void lo_FormatText(MWContext *, lo_DocState *, char *);
 extern void lo_PreformatedText(MWContext *, lo_DocState *, char *);
 extern LO_Element * lo_RelayoutTextBlock ( MWContext * context, lo_DocState * state, LO_TextBlock * block, LO_TextStruct * fromElement );
 extern FILE *lo_TableTrace(void);	/* NS_TABLE_TRACE, laytable.c */
+
+/* laycssgrid.c */
+extern lo_CSSGridRec *lo_cssgrid_new(MWContext *context, lo_DocState *state,
+							   StyleStruct *style_struct, int32 width);
+extern void lo_cssgrid_free(lo_CSSGridRec *grid);
+extern void lo_cssgrid_item_lines(lo_CSSGridRec *grid, char *spec, int32 *lines);
+/* N items (CELLS: their cells, NULL for none) with their content's
+ * min and max widths, in AVAIL: their widths and x (from the content
+ * edge) */
+extern void lo_cssgrid_widths(lo_TableRec *table, int32 n, lo_TableCell **cells,
+						   int32 *minw, int32 *maxw, int32 avail,
+						   int32 *w, int32 *x);
+/* then with their heights laid out at those widths, in HEIGHT (or -1):
+ * their y and heights; returns the grid's height */
+extern int32 lo_cssgrid_heights(lo_TableRec *table, int32 n, lo_TableCell **cells,
+							 int32 *content_h, int32 height,
+							 int32 *y, int32 *h);
 extern Bool lo_ChangeText ( LO_TextBlock * block, char * text );
 extern void lo_FlushLineBuffer(MWContext *, lo_DocState *);
 extern void lo_FlushTextBlock ( MWContext *context, lo_DocState *state );

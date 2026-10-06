@@ -3665,6 +3665,11 @@ lo_BeginTableCellAttributes(MWContext *context,
 	table_cell->flex_order = table->flex_next_order;
 	table_cell->flex_cross = table->flex_next_cross;
 	table_cell->flex_align = table->flex_next_align;
+	XP_MEMCPY(table_cell->grid_lines, table->grid_next_lines,
+			  sizeof table_cell->grid_lines);
+	table_cell->grid_justify = table->grid_next_justify;
+	XP_MEMSET(table->grid_next_lines, 0, sizeof table->grid_next_lines);
+	table->grid_next_justify = -1;
 	table->flex_next_order = 0;
 	table->flex_next_cross = -1;
 	table->flex_next_align = LO_FLEX_ALIGN_STRETCH;
@@ -5041,6 +5046,10 @@ lo_BeginTableAttributes(MWContext *context,
 	table->flex_next_grow = 0;
 	table->flex_next_shrink = 1;
 	table->flex_next_basis = -1;
+	table->grid = NULL;
+	table->grid_next_lines[0] = table->grid_next_lines[1] = 0;
+	table->grid_next_lines[2] = table->grid_next_lines[3] = 0;
+	table->grid_next_justify = -1;
 
 	table->current_subdoc = (LO_SubDocStruct *)lo_NewElement(context, state, LO_SUBDOC, NULL, 0);
 	table->current_subdoc->type = LO_SUBDOC;
@@ -6762,6 +6771,38 @@ lo_flex_widths(lo_TableRec *table, lo_cell_data XP_HUGE *cell_array,
 		- table->table_ele->border_left_width
 		- table->table_ele->border_right_width;
 
+	if (table->flex == LO_FLEX_GRID)
+	{
+		/* a grid: laygrid.c places the items and sizes the columns;
+		 * each item is its own line (its area's y and height) */
+		lo_TableCell *cells[256];
+		int32 gx[256];
+
+		for (i = 0; i < n; i++)
+		{
+			cells[i] = (i < table->cols) ? cell_array[i].cell : NULL;
+			if (cells[i] == blank_cell)
+				cells[i] = NULL;
+			fin[i] = dimw[i];
+			gx[i] = 0;
+		}
+		lo_cssgrid_widths(table, n, cells, minw, dimw, avail, fin, gx);
+		for (i = 0; i < n; i++)
+		{
+			table->flex_x[i] = cell_pad + gx[i];
+			table->flex_line[i] = i;
+		}
+		table->flex_lines = n;
+		for (sp = table->width_spans, i = 0; sp != NULL && i < n;
+			 sp = sp->next, i++)
+		{
+			sp->dim = fin[i];
+			if (sp->min_dim > fin[i])
+				sp->min_dim = fin[i];
+		}
+		return;
+	}
+
 	if (LO_FLEX_IS_COLUMN(table))
 	{
 		/* a column: each item its own line; across, stretched to the
@@ -6986,6 +7027,36 @@ lo_flex_cross(lo_TableRec *table, lo_cell_data XP_HUGE *cell_array,
 
 	if (table->flex_items == 0 || !table->height_spans)
 		return;
+	if (table->flex == LO_FLEX_GRID)
+	{
+		/* the rows, from the items laid out at their widths */
+		lo_TableCell *cells[256];
+		int32 h[256], n = table->flex_items, height;
+
+		if (n > 256)
+			n = 256;
+		for (i = 0; i < n; i++)
+		{
+			lo_TableCell *cell = (i < table->cols) ? cell_array[i].cell : NULL;
+
+			if (cell == blank_cell)
+				cell = NULL;
+			cells[i] = cell;
+			h[i] = 0;
+			if (cell)
+			{
+				h[i] = cell->cell ? cell->cell->height : cell->height;
+				if (cell->height > h[i])
+					h[i] = cell->height;
+			}
+		}
+		height = table->height > 0 ? table->height
+			- table->table_ele->border_top_width
+			- table->table_ele->border_bottom_width : -1;
+		table->height_spans->dim = lo_cssgrid_heights(table, n, cells, h,
+			height, table->flex_line_y, table->flex_line_h);
+		return;
+	}
 	if (LO_FLEX_IS_COLUMN(table))
 	{
 		lo_flex_column(table, cell_array, blank_cell);
@@ -8517,6 +8588,11 @@ static void lo_FreeAllExceptRows( MWContext *context, lo_DocState *state, lo_Tab
 		table->table_ele->table = NULL;
 	}
 
+	XP_FREEIF(table->flex_line);
+	XP_FREEIF(table->flex_x);
+	XP_FREEIF(table->flex_line_y);
+	XP_FREEIF(table->flex_line_h);
+	lo_cssgrid_free(table->grid);
 	XP_DELETE(table);
 }
 

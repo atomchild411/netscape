@@ -54,6 +54,7 @@ CSRCS		= bullet.c \
 		  layimage.c \
 		  layout.c \
 		  laysel.c \
+		  laycssgrid.c \
 		  laytable.c \
 		  laytags.c \
 		  laytext.c \
