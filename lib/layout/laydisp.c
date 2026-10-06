@@ -604,6 +604,13 @@ lo_DisplayCell(MWContext *context, LO_CellStruct *cell)
 		&& cell->border_width == 0)
 		return;
 
+	if (lo_TableTrace())
+		fprintf(lo_TableTrace(), "display cell %p x=%ld y=%ld w=%ld h=%ld bg=%s%02x%02x%02x\n",
+			(void *)cell, (long)cell->x, (long)cell->y, (long)cell->width,
+			(long)cell->height, cell->backdrop.bg_color ? "#" : "none ",
+			cell->backdrop.bg_color ? cell->backdrop.bg_color->red : 0,
+			cell->backdrop.bg_color ? cell->backdrop.bg_color->green : 0,
+			cell->backdrop.bg_color ? cell->backdrop.bg_color->blue : 0);
 	if (context->compositor && cell->cell_bg_layer)
             CL_SetLayerHidden(cell->cell_bg_layer, PR_FALSE);
         

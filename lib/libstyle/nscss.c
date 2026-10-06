@@ -76,6 +76,7 @@
 #define FLEXJUSTIFY_PROP		"nsFlexJustify"
 #define FLEXALIGN_PROP			"nsFlexAlign"
 #define FLEXGAP_PROP			"nsFlexGap"
+#define FLEXWRAP_PROP			"nsFlexWrap"
 #define FLEXITEM_PROP			"nsFlexItem"
 #define FLEXALIGNSELF_PROP		"nsFlexAlignSelf"
 #define BORDERTOPWIDTH_PROP		"borderTopWidth"
@@ -2014,6 +2015,11 @@ nscss_export_flex_container(NSCSS_Doc *doc, const css_computed_style *st,
 	case CSS_ALIGN_ITEMS_BASELINE: nscss_set(style, FLEXALIGN_PROP, "baseline"); break;
 	default: break;				/* stretch */
 	}
+	switch (css_computed_flex_wrap(st)) {
+	case CSS_FLEX_WRAP_WRAP: nscss_set(style, FLEXWRAP_PROP, "wrap"); break;
+	case CSS_FLEX_WRAP_WRAP_REVERSE: nscss_set(style, FLEXWRAP_PROP, "wrap-reverse"); break;
+	default: break;
+	}
 	if (css_computed_column_gap(st, &len, &unit) == CSS_COLUMN_GAP_SET &&
 		len > 0 && unit != CSS_UNIT_PCT)
 		nscss_set(style, FLEXGAP_PROP, nscss_len(doc, buf, len, unit));
@@ -2027,6 +2033,7 @@ nscss_export_flex_item(NSCSS_Doc *doc, const css_computed_style *st,
 	css_fixed grow = 0, shrink = INTTOFIX(1), len;
 	css_unit unit;
 	uint8_t b;
+	int32_t order = 0;
 
 	css_computed_flex_grow(st, &grow);
 	css_computed_flex_shrink(st, &shrink);
@@ -2037,8 +2044,9 @@ nscss_export_flex_item(NSCSS_Doc *doc, const css_computed_style *st,
 		PR_snprintf(basis, sizeof basis, "%g%%", FIXTOFLT(len));
 	else
 		XP_STRCPY(basis, b == CSS_FLEX_BASIS_CONTENT ? "content" : "auto");
-	PR_snprintf(buf, sizeof buf, "%g %g %s", FIXTOFLT(grow), FIXTOFLT(shrink),
-				basis);
+	css_computed_order(st, &order);
+	PR_snprintf(buf, sizeof buf, "%g %g %s %ld", FIXTOFLT(grow),
+				FIXTOFLT(shrink), basis, (long) order);
 	nscss_set(style, FLEXITEM_PROP, buf);
 	switch (css_computed_align_self(st)) {
 	case CSS_ALIGN_SELF_STRETCH: nscss_set(style, FLEXALIGNSELF_PROP, "stretch"); break;

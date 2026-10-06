@@ -109,6 +109,7 @@ extern XP_Bool LO_IsStyledUnknownTag(lo_DocState *state, PA_Tag *tag, XP_Bool *i
 #define FLEXJUSTIFY_STYLE		"nsFlexJustify"
 #define FLEXALIGN_STYLE			"nsFlexAlign"
 #define FLEXGAP_STYLE			"nsFlexGap"
+#define FLEXWRAP_STYLE			"nsFlexWrap"
 #define FLEXITEM_STYLE			"nsFlexItem"
 #define FLEXALIGNSELF_STYLE		"nsFlexAlignSelf"
 #define STYLE_NEED_TO_POP_FLEX_ITEM	"nsNeedToPopFlexItem"

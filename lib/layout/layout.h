@@ -284,6 +284,7 @@ typedef struct lo_TableCell_struct {
 	/* a flex item (in a flex table: lo_TableRec.flex) */
 	double flex_grow, flex_shrink;
 	int32 flex_basis;		/* its outer width, or -1: its content's */
+	int32 flex_order;		/* order */
 } lo_TableCell;
 
 
@@ -353,11 +354,20 @@ typedef struct lo_TableRec_struct {
 	intn flex_justify;		/* LO_FLEX_JUSTIFY_* */
 	int32 flex_gap;			/* column-gap */
 	Bool flex_stretch;		/* align-items: stretch */
+	intn flex_wrap;			/* flex-wrap: 0, 1 wrap, 2 wrap-reverse */
+	/* the layout (lo_flex_widths, lo_flex_cross): per item its line and
+	 * x; per line its y and height (all from the table's content edge) */
+	int32 flex_items;
+	int32 *flex_line;
+	int32 *flex_x;
+	int32 flex_lines;
+	int32 *flex_line_y;
+	int32 *flex_line_h;
 	int32 flex_lead;		/* space before the first item */
 	int32 flex_between;		/* space added between items */
 	/* for the next cell begun: its item's flex */
 	double flex_next_grow, flex_next_shrink;
-	int32 flex_next_basis;
+	int32 flex_next_basis, flex_next_order;
 } lo_TableRec;
 
 #define LO_FLEX_NONE		0

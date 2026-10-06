@@ -368,6 +368,10 @@ lo_ShiftCell(LO_CellStruct *cell, int32 dx, int32 dy)
             CL_MoveLayer(cell->cell_bg_layer,
                          cell->x - x_offset, cell->y - y_offset);
 			CL_ResizeLayer(cell->cell_bg_layer, cell->width, cell->height);
+			if (lo_TableTrace())
+				fprintf(lo_TableTrace(), "bg layer of cell %p: %ld,%ld %ldx%ld\n",
+					(void *)cell, (long)cell->x, (long)cell->y,
+					(long)cell->width, (long)cell->height);
         }
         if (cell->cell_inflow_layer)
             lo_OffsetInflowLayer(cell->cell_inflow_layer, dx, dy);

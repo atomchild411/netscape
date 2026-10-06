@@ -3398,6 +3398,12 @@ lo_flex_container_begin(MWContext *context, lo_DocState *state,
 		table->flex_stretch = FALSE;	/* start, center, end, baseline */
 		XP_FREE(v);
 	}
+	table->flex_wrap = 0;
+	if ((v = STYLESTRUCT_GetString(style_struct, FLEXWRAP_STYLE)) != NULL)
+	{
+		table->flex_wrap = !strcmp(v, "wrap-reverse") ? 2 : 1;
+		XP_FREE(v);
+	}
 	table->flex_gap = 0;
 	gap = STYLESTRUCT_GetNumber(style_struct, FLEXGAP_STYLE);
 	LO_AdjustSSUnits(gap, WIDTH_STYLE, context, state);
@@ -3463,6 +3469,7 @@ lo_flex_item_begin(MWContext *context, lo_DocState *state,
 	char *item = STYLESTRUCT_GetString(style_struct, FLEXITEM_STYLE);
 	lo_TableRec *table = state->current_table;
 	double grow = 0, shrink = 1;
+	long order = 0;
 	char basis[64], *valign = NULL, *self, *bgcolor;
 	char *height_attr = NULL;
 	int32 basis_px = -1;
@@ -3477,7 +3484,7 @@ lo_flex_item_begin(MWContext *context, lo_DocState *state,
 		return state;
 	}
 	basis[0] = '\0';
-	sscanf(item, "%lf %lf %63s", &grow, &shrink, basis);
+	sscanf(item, "%lf %lf %63s %ld", &grow, &shrink, basis, &order);
 	XP_FREE(item);
 	if (basis[0] && strcmp(basis, "auto") && strcmp(basis, "content") &&
 		!strchr(basis, '%'))
@@ -3517,6 +3524,7 @@ lo_flex_item_begin(MWContext *context, lo_DocState *state,
 	table->flex_next_grow = grow;
 	table->flex_next_shrink = shrink;
 	table->flex_next_basis = basis_px;
+	table->flex_next_order = (int32)order;
 
 	/* align-self; without it, the row's (the container's align-items) */
 	*stretched = table->flex_stretch;
@@ -3533,6 +3541,12 @@ lo_flex_item_begin(MWContext *context, lo_DocState *state,
 			valign = "baseline";
 		XP_FREE(self);
 	}
+	/* an item with a height of its own does not stretch */
+	num = STYLESTRUCT_GetNumber(style_struct, HEIGHT_STYLE);
+	if (num && !(num->units && !strcasecomp(num->units, "%")))
+		*stretched = FALSE;
+	STYLESTRUCT_FreeSSNumber(style_struct, num);
+
 	/* a stretched item's background fills the row's height: the cell's;
 	 * another's is its own box in the cell (as high as its content) */
 	bgcolor = *stretched ? STYLESTRUCT_GetString(style_struct, BG_COLOR_STYLE)
@@ -3551,9 +3565,21 @@ lo_flex_item_begin(MWContext *context, lo_DocState *state,
 	}
 	STYLESTRUCT_FreeSSNumber(style_struct, num);
 
+	if (lo_TableTrace())
+		fprintf(lo_TableTrace(), "flex item: grow %g shrink %g basis %ld valign %s stretched %d bg %s table-stretch %d\n",
+				grow, shrink, (long)basis_px, valign ? valign : "-",
+				(int)*stretched, bgcolor ? bgcolor : "-", (int)table->flex_stretch);
 	lo_BeginTableCellAttributes(context, state, table, NULL, NULL, NULL,
 								bgcolor, NULL, LO_TILE_BOTH, valign, NULL,
 								NULL, height_attr, FALSE, TRUE);
+	/* CSS backgrounds are not inherited (the cell would take its row's,
+	 * its table's or the enclosing cell's) */
+	if (!bgcolor && table->current_subdoc &&
+		table->current_subdoc->backdrop.bg_color)
+	{
+		XP_DELETE(table->current_subdoc->backdrop.bg_color);
+		table->current_subdoc->backdrop.bg_color = NULL;
+	}
 	XP_FREEIF(bgcolor);
 	XP_FREEIF(height_attr);
 	STYLESTRUCT_SetString(style_struct, STYLE_NEED_TO_POP_FLEX_ITEM, "1", 0);
