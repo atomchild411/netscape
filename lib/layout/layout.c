@@ -1246,6 +1246,9 @@ lo_FlushLineList(MWContext *context, lo_DocState *state, uint32 break_type, uint
 				atomic = TRUE;
 		if(atomic && diff < 0)
 			css_lh = -1;
+		if(lo_TableTrace())
+			fprintf(lo_TableTrace(), "line: css line-height %ld, content %ld, sub %d\n",
+				(long)css_lh, (long)state->line_height, (int)state->is_a_subdoc);
 		if(css_lh >= 0)
 		{
 			if(half != 0)

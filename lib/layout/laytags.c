@@ -4528,6 +4528,15 @@ lo_SetStyleSheetBoxProperties(MWContext *context,
 		}
 	}
 
+	/* an inline-block's horizontal margins are space in its line, before
+	 * it (the one after: lo_EndTable), not the line's margins */
+	if(is_inline_block)
+	{
+		if(left_margin_offset > 0)
+			state->x += left_margin_offset;
+		left_margin_offset = right_margin_offset = 0;
+	}
+
 	if(left_margin_offset || right_margin_offset || (text_width && !use_table_for_box))
 	{
 		/* only set the list to be pop'd for styles outside
